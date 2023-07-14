@@ -10,12 +10,12 @@ use embedded_graphics::{
         MonoTextStyle,
     },
     pixelcolor::Rgb565,
-    prelude::{DrawTarget, RgbColor, *},
+    prelude::{*, DrawTarget, RgbColor},
     text::Text,
 };
 use embedded_graphics::mono_font::iso_8859_16::FONT_10X20;
 use embedded_svc::storage::RawStorage;
-use esp_idf_hal::{delay::Ets, gpio::PinDriver, gpio::{AnyIOPin, Gpio13, Gpio14, Gpio15, Gpio19, Gpio27}, i2c::I2cConfig, i2c::I2cDriver, peripherals::Peripherals, prelude::*, spi::{Dma, SpiDeviceDriver, SpiDriver, SPI2}, delay};
+use esp_idf_hal::{delay, delay::Ets, gpio::{AnyIOPin, Gpio13, Gpio14, Gpio15, Gpio19, Gpio27}, gpio::PinDriver, i2c::I2cConfig, i2c::I2cDriver, peripherals::Peripherals, prelude::*, spi::{Dma, SPI2, SpiDeviceDriver, SpiDriver}};
 
 use embedded_svc::wifi::{ClientConfiguration, Configuration, Wifi};
 use esp_idf_hal::modem::Modem;
@@ -34,25 +34,32 @@ use esp_idf_sys::{
 };
 use pcf8563::{DateTime, PCF8563};
 use time::{Date, Month, OffsetDateTime, PrimitiveDateTime, UtcOffset};
-use time::macros::{datetime, offset, format_description};
+use time::macros::{datetime, format_description, offset};
 //use esp_idf_svc::log;
 use bma423::{Bma423, FeatureInterruptStatus, Features, InterruptLine, PowerControlFlag};
 use embedded_hal::blocking::i2c::{Write, WriteRead};
+use embedded_hal::digital::v2::OutputPin;
 use embedded_hal::prelude::_embedded_hal_blocking_i2c_Write;
 
 use esp_idf_hal::{
     gpio::{self, Output},
     i2c
 };
+use esp_idf_hal::gpio::Gpio21;
 use esp_idf_svc::log::EspLogger;
 
 mod peripherals {
     pub mod gc9a01;
     pub mod bma423ex;
+    pub mod backlight;
+    pub mod hal;
+    //pub mod pin_wrapper;
 }
+
 
 use crate::peripherals::gc9a01::Builder_GC9A01Rgb565;
 use crate::peripherals::bma423ex::{AxesConfig, Bma423Ex, InterruptIOCtlFlags};
+use crate::peripherals::hal::{HAL, PinConfig};
 
 const SSID: &str = "HOTBOX-B212";
 const PASS: &str = "0534337688";
@@ -73,6 +80,12 @@ fn main() {
     let wakeup_cause_str = format_wakeup_cause(wakeup_cause);
 
     let peripherals = Peripherals::take().unwrap();
+
+    let pin_conf = PinConfig {
+        backlight: peripherals.pins.gpio21.into(),
+    };
+
+    let mut hal = HAL::new(pin_conf);
 
     let mut delay = Ets;
     let spi = unsafe { SPI2::new() };
@@ -98,8 +111,9 @@ fn main() {
         .map_err(|_| Box::<dyn Error>::from("display init"))
         .unwrap();
 
-    let mut backlight = PinDriver::output(peripherals.pins.gpio21).unwrap();
-    backlight.set_high().unwrap();
+    hal.backlight.on();
+    //let mut backlight = PinDriver::output(unsafe { Gpio21::new() }).unwrap();
+    //backlight.set_high().unwrap();
 
     // clear the display to black
     display
@@ -278,6 +292,7 @@ fn main() {
 
         thread::sleep(Duration::from_millis(1500));
         display.clear(Rgb565::BLACK).unwrap();
+        hal.backlight.off();
 
         println!("going to deep sleep");
         esp_idf_sys::esp_deep_sleep_disable_rom_logging();
@@ -320,7 +335,7 @@ fn setupWifi(sysloop: EspEventLoop<System>, modem: Modem, nvs_partition: EspNvsP
     println!("after wifi connect");
 
     while wifi_driver.sta_netif().get_ip_info().unwrap().ip.is_unspecified() {
-        thread::sleep(Duration::from_millis(1000));
+        thread::sleep(Duration::from_millis(2000));
     }
 
     println!("ip acquired");
