@@ -1,4 +1,4 @@
-use embedded_hal::digital::v2::OutputPin;
+use embedded_hal::digital::OutputPin;
 use esp_idf_hal::gpio::{AnyIOPin, Output, OutputMode, Pin, PinDriver};
 use esp_idf_hal::peripheral::Peripheral;
 use crate::peripherals::backlight::Backlight;

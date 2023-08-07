@@ -1,11 +1,9 @@
 use bma423::{Error, FeatureInterruptStatus, PowerConfigurationFlag, PowerControlFlag, State};
-use embedded_hal::blocking::{
-    i2c::{Write, WriteRead},
-};
 
 use bitmask_enum::bitmask;
-use embedded_hal::blocking::delay::DelayUs;
-use esp_idf_sys::netif_ext_callback_args_t_ipv6_set_s;
+use embedded_hal::i2c::{I2c, Error as I2cError};
+use embedded_hal::delay::DelayUs;
+use esp_idf_sys::{EspError, netif_ext_callback_args_t_ipv6_set_s};
 use num_enum::{IntoPrimitive};
 
 const BMA423_CONFIG_FILE: [u8; 6144] = [
@@ -468,9 +466,7 @@ impl AxesConfig {
     }
 }
 
-impl<E, I2C> Bma423Ex<I2C>
-    where
-        I2C: Write<Error = E> + WriteRead<Error = E>,
+impl<I2C: I2c> Bma423Ex<I2C>
 {
     pub fn new(i2c: I2C) -> Self {
         Self {
@@ -478,17 +474,17 @@ impl<E, I2C> Bma423Ex<I2C>
         }
     }
 
-    fn write(&mut self, data: &[u8]) -> Result<(), Error<E>> {
+    fn write(&mut self, data: &[u8]) -> Result<(), I2C::Error> {
         self.i2c.write(DEFAULT_ADDRESS, data)?;
         Ok(())
     }
 
-    fn write_read(&mut self, reg: Reg, data: &mut [u8]) -> Result<(), Error<E>> {
+    fn write_read(&mut self, reg: Reg, data: &mut [u8]) -> Result<(), I2C::Error> {
         self.i2c.write_read(DEFAULT_ADDRESS, &[reg.into()], data)?;
         Ok(())
     }
 
-    pub fn configure_int1_io_ctrl(&mut self, flags: InterruptIOCtlFlags) -> Result<u8, Error<E>> {
+    pub fn configure_int1_io_ctrl(&mut self, flags: InterruptIOCtlFlags) -> Result<u8, I2C::Error> {
         let mut data: [u8; 2] = [u8::from(Reg::Interrupt1IOCtl), 0];
         self.write_read(Reg::Interrupt1IOCtl, &mut data[1..])?;
         data[1] |= u8::from(flags);
@@ -496,7 +492,7 @@ impl<E, I2C> Bma423Ex<I2C>
         Ok(data[1])
     }
 
-    pub fn remap_axes(&mut self, axes_config: AxesConfig) -> Result<(), Error<E>> {
+    pub fn remap_axes(&mut self, axes_config: AxesConfig) -> Result<(), I2C::Error> {
         let mut feature_config: [u8; FEATURE_SIZE + 1] = [0; FEATURE_SIZE + 1];
         self.write_read(Reg::FeatureConfig, &mut feature_config[1..FEATURE_SIZE + 1])?;
 
@@ -518,7 +514,7 @@ impl<E, I2C> Bma423Ex<I2C>
         Ok(())
     }
 
-    pub fn enable_wrist_tilt(&mut self) -> Result<(), Error<E>> {
+    pub fn enable_wrist_tilt(&mut self) -> Result<(), I2C::Error> {
         let mut feature_config: [u8; FEATURE_SIZE + 1] = [0; FEATURE_SIZE + 1];
         self.write_read(Reg::FeatureConfig, &mut feature_config[1..])?;
 
@@ -537,14 +533,14 @@ impl<E, I2C> Bma423Ex<I2C>
         Ok(())
     }
 
-    pub fn get_feature_config(&mut self) -> Result<(Vec<u8>), Error<E>> {
+    pub fn get_feature_config(&mut self) -> Result<(Vec<u8>), I2C::Error> {
         let mut feature_config: [u8; FEATURE_SIZE + 1] = [0; FEATURE_SIZE + 1];
         feature_config[0] = Reg::FeatureConfig.into();
         self.write_read(Reg::FeatureConfig, &mut feature_config[1..])?;
         Ok(Vec::from((feature_config)))
     }
 
-    pub fn read_internal_status(&mut self) -> Result<u8, Error<E>> {
+    pub fn read_internal_status(&mut self) -> Result<u8, I2C::Error> {
         let mut data: [u8; 1] = [0];
         self.write_read(Reg::InternalStatus, &mut data)?;
 
@@ -555,7 +551,7 @@ impl<E, I2C> Bma423Ex<I2C>
         &mut self,
         interrupts: FeatureInterruptStatus,
         enable: bool,
-    ) -> Result<(), Error<E>> {
+    ) -> Result<(), I2C::Error> {
         let mut data: [u8; 2] = [0; 2];
         self.write_read(Reg::FeatureInterrupt1Mapping, &mut data[1..])?;
 
@@ -571,13 +567,13 @@ impl<E, I2C> Bma423Ex<I2C>
         Ok(())
     }
 
-    pub fn get_err_reg(&mut self) -> Result<(u8), Error<E>> {
+    pub fn get_err_reg(&mut self) -> Result<(u8), I2C::Error> {
         let mut data: [u8; 1] = [0];
         self.write_read(Reg::ErrReg, &mut data)?;
         return Ok(data[0]);
     }
 
-    pub fn soft_reset(&mut self, delay: &mut impl DelayUs<u32>) -> Result<(), Error<E>> {
+    pub fn soft_reset(&mut self, delay: &mut impl DelayUs) -> Result<(), I2C::Error> {
         let mut data: [u8; 2] = [Reg::Cmd.into(), 0xB6];
         self.write(&mut data)?;
 
@@ -586,15 +582,15 @@ impl<E, I2C> Bma423Ex<I2C>
         Ok(())
     }
 
-    pub fn set_power_control(&mut self, value: PowerControlFlag) -> Result<(), Error<E>> {
+    pub fn set_power_control(&mut self, value: PowerControlFlag) -> Result<(), I2C::Error> {
         self.write(&[Reg::PowerControl.into(), value.into()])
     }
 
-    pub fn set_power_config(&mut self, value: PowerConfigurationFlag) -> Result<(), Error<E>> {
+    pub fn set_power_config(&mut self, value: PowerConfigurationFlag) -> Result<(), I2C::Error> {
         self.write(&[Reg::PowerConfiguration.into(), value.into()])
     }
 
-    fn stream_write(&mut self, reg: Reg, data: &[u8], delay: &mut impl DelayUs<u32>) -> Result<(), Error<E>> {
+    fn stream_write(&mut self, reg: Reg, data: &[u8], delay: &mut impl DelayUs) -> Result<(), I2C::Error> {
         let inc: usize = READ_WRITE_LEN;
         let mut index: usize = 0;
 
@@ -622,7 +618,7 @@ impl<E, I2C> Bma423Ex<I2C>
         Ok(())
     }
 
-    pub fn init(&mut self, delay: &mut impl DelayUs<u32>) -> Result<(), Error<E>> {
+    pub fn init(&mut self, delay: &mut impl DelayUs) -> Result<(), I2C::Error> {
         self.set_power_config(PowerConfigurationFlag::none())?;
 
         delay.delay_us(450);

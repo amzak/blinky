@@ -1,8 +1,8 @@
 use display_interface::{DataFormat, DisplayError, WriteOnlyDataCommand};
-use embedded_graphics::pixelcolor::Rgb565;
+use embedded_graphics::pixelcolor::{Rgb565, RgbColor};
 use embedded_graphics::prelude::IntoStorage;
-use embedded_hal::blocking::delay::DelayUs;
-use embedded_hal::digital::v2::OutputPin;
+use embedded_hal::delay::DelayUs;
+use embedded_hal::digital::OutputPin;
 use mipidsi::instruction::Instruction;
 use mipidsi::models::Model;
 use mipidsi::Display;
@@ -23,7 +23,7 @@ impl Model for GC9A01Rgb565 {
     ) -> Result<u8, InitError<RST::Error>>
         where
             RST: OutputPin,
-            DELAY: DelayUs<u32>,
+            DELAY: DelayUs,
             DI: WriteOnlyDataCommand,
     {
         match rst {

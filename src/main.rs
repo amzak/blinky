@@ -1,5 +1,7 @@
 use std::{error::Error, ptr, thread, time::Duration};
+use std::cell::RefCell;
 use std::mem::size_of;
+use std::sync::Mutex;
 use std::time::SystemTime;
 
 //use chrono::{DateTime, FixedOffset, NaiveDateTime, TimeZone};
@@ -20,7 +22,7 @@ use esp_idf_hal::{delay, delay::Ets, gpio::{AnyIOPin, Gpio13, Gpio14, Gpio15, Gp
 use embedded_svc::wifi::{ClientConfiguration, Configuration, Wifi};
 use esp_idf_hal::modem::Modem;
 
-use esp_idf_svc::{eventloop::EspSystemEventLoop, log, netif::{EspNetif, EspNetifWait}, nvs, nvs::EspDefaultNvsPartition, ping, sntp, wifi::{EspWifi, WifiWait}};
+use esp_idf_svc::{eventloop::EspSystemEventLoop, log, netif::{ EspNetif }, nvs, nvs::EspDefaultNvsPartition, ping, sntp, wifi::{ EspWifi }};
 use esp_idf_svc::eventloop::{EspEventLoop, System};
 use esp_idf_svc::nvs::{EspNvs, EspNvsPartition, NvsDefault};
 use esp_idf_svc::sntp::{OperatingMode, SntpConf, SyncMode, SyncStatus};
@@ -37,27 +39,35 @@ use time::{Date, Month, OffsetDateTime, PrimitiveDateTime, UtcOffset};
 use time::macros::{datetime, format_description, offset};
 //use esp_idf_svc::log;
 use bma423::{Bma423, FeatureInterruptStatus, Features, InterruptLine, PowerControlFlag};
-use embedded_hal::blocking::i2c::{Write, WriteRead};
-use embedded_hal::digital::v2::OutputPin;
-use embedded_hal::prelude::_embedded_hal_blocking_i2c_Write;
+use cst816s::{CST816S, TouchEvent};
+use embedded_graphics::primitives::{Circle, PrimitiveStyle};
+use embedded_svc::io::Write;
+use embedded_hal::digital::OutputPin;
+use embedded_hal_bus::i2c::RefCellDevice;
 
 use esp_idf_hal::{
     gpio::{self, Output},
     i2c
 };
-use esp_idf_hal::gpio::Gpio21;
+use esp_idf_hal::gpio::{Gpio12, Gpio21, Gpio33, Input};
+use esp_idf_hal::i2c::I2c;
 use esp_idf_svc::log::EspLogger;
 
+use esp32_nimble::{uuid128, BLEDevice, NimbleProperties};
+use esp_idf_hal::spi::config::DriverConfig;
+use mipidsi::Builder;
+use embedded_hal_compat::{ForwardCompat, Reverse, ReverseCompat};
+
 mod peripherals {
-    pub mod gc9a01;
+    //pub mod gc9a01;
     pub mod bma423ex;
     pub mod backlight;
     pub mod hal;
+    //pub mod cst816s;
     //pub mod pin_wrapper;
 }
 
 
-use crate::peripherals::gc9a01::Builder_GC9A01Rgb565;
 use crate::peripherals::bma423ex::{AxesConfig, Bma423Ex, InterruptIOCtlFlags};
 use crate::peripherals::hal::{HAL, PinConfig};
 
@@ -95,7 +105,12 @@ fn main() {
     let rst = PinDriver::input_output_od(unsafe { Gpio27::new() }).unwrap();
     let dc = PinDriver::input_output_od(unsafe { Gpio19::new() }).unwrap();
 
-    let driver = SpiDriver::new(spi, sclk, sdo, None::<AnyIOPin>, Dma::Disabled).unwrap();
+    let config = DriverConfig {
+        dma: Dma::Disabled,
+        intr_flags: Default::default(),
+    };
+
+    let driver = SpiDriver::new(spi, sclk, sdo, None::<AnyIOPin>, &config).unwrap();
 
     let spi_config = esp_idf_hal::spi::config::Config::default()
         .baudrate(20_000_000.Hz())
@@ -106,7 +121,8 @@ fn main() {
     // create a DisplayInterface from SPI and DC pin, with no manual CS control
     let di = SPIInterfaceNoCS::new(spi, dc);
     // create the ILI9486 display driver in rgb666 color mode from the display interface and use a HW reset pin during init
-    let mut display = Builder_GC9A01Rgb565::create(di)
+    let mut display = Builder::gc9a01(di)
+    //let mut display = Builder_GC9A01Rgb565::create(di)
         .init(&mut delay, Some(rst))
         .map_err(|_| Box::<dyn Error>::from("display init"))
         .unwrap();
@@ -138,12 +154,13 @@ fn main() {
 
     let i2c_driver = I2cDriver::new(peripherals.i2c0, sda, scl, &config).unwrap();
 
-    let i2c_bus: &'static _ = shared_bus::new_std!(I2cDriver = i2c_driver).unwrap();
+    let i2c_ref_cell = RefCell::new(i2c_driver);
 
-    let i2c_proxy2 = i2c_bus.acquire_i2c();
-    let mut accel = Bma423::new_with_address(i2c_proxy2, 0x18);
-    let i2c_proxy3 = i2c_bus.acquire_i2c();
-    let mut accel_ex = Bma423Ex::new(i2c_proxy3);
+    let proxy_accel = RefCellDevice::new(&i2c_ref_cell);
+    let mut accel = Bma423::new_with_address(proxy_accel.reverse(), 0x18);
+
+    let proxy_accel_ex = RefCellDevice::new(&i2c_ref_cell);
+    let mut accel_ex = Bma423Ex::new(proxy_accel_ex);
 
     let interrupt_status = accel.read_interrupt_status().unwrap();
     let feature_interrupt_status: u8 = interrupt_status.feature.into();
@@ -186,16 +203,41 @@ fn main() {
     let feature_config = accel_ex.get_feature_config().unwrap();
     println!("feature_config = {:02X?}", feature_config);
 
-    for i in 0..1 {
-        let (ax, ay, az) = accel.get_x_y_z().unwrap();
+    let proxy_touch = RefCellDevice::new(&i2c_ref_cell);
 
-        println!("ax = {} ay = {} az = {}", ax, ay, az);
+    let touch_rst = peripherals.pins.gpio33.into();
+    let touch_int = peripherals.pins.gpio12.into();
+    let mut touch = setupTouchpad(touch_rst, touch_int, proxy_touch);
 
-        thread::sleep(Duration::from_millis(100));
+    //let info = touch.get_device_info().unwrap();
+    //println!("touch device version = {} info = {:02X?}", info.Version, info.VersionInfo);
+
+    let (ax, ay, az) = accel.get_x_y_z().unwrap();
+    println!("ax = {} ay = {} az = {}", ax, ay, az);
+
+    //let gestAddr = touch.set_gesture_output_address(0x01).unwrap();
+    //println!("touch gest addr = {}", gestAddr);
+
+    let mut data: [u8; 10] = [0; 10];
+
+    for i in 0..100 {
+        //touch.get_data_raw(&mut data).unwrap();
+        //println!("touch raw data = {:02X?}", data);
+
+        let touch_event = touch.read_one_touch_event(false).unwrap();
+        let TouchEvent {x,y,..} = touch_event;
+
+        println!("touch gesture = {:?} x = {} y = {}", touch_event.gesture, x, y);
+
+        Circle::new(Point::new(x, y), 5)
+            .into_styled(PrimitiveStyle::with_fill(Rgb565::RED))
+            .draw(&mut display).unwrap();
+
+        thread::sleep(Duration::from_millis(20));
     }
 
-    //let i2c_proxy = i2c_bus.acquire_i2c();
-    //let mut rtc = PCF8563::new(i2c_proxy);
+    let proxy_rtc = RefCellDevice::new(&i2c_ref_cell);
+    let mut rtc = PCF8563::new(proxy_rtc.reverse());
 
     let datetime_rtc = DateTime {
         year: 23,
@@ -205,7 +247,9 @@ fn main() {
         hours: 0,
         minutes: 0,
         seconds: 0,
-    }; //rtc.get_datetime().unwrap();
+    };
+
+    rtc.get_datetime().unwrap();
 
     let offset = UtcOffset::from_hms(2, 0, 0).unwrap();
 
@@ -226,7 +270,7 @@ fn main() {
     print!("rtc: {}", datetime);
 
     display
-        .clear(Rgb565::BLACK)
+        .clear(Rgb565::WHITE)
         .map_err(|_| Box::<dyn Error>::from("clear display"))
         .unwrap();
 
@@ -236,7 +280,7 @@ fn main() {
     );
 
     let text = datetime.format(&template).unwrap();
-    let style_time = MonoTextStyle::new(&FONT_10X20, Rgb565::WHITE);
+    let style_time = MonoTextStyle::new(&FONT_10X20, Rgb565::BLACK);
 
     Text::with_alignment(
         &text,
@@ -250,7 +294,8 @@ fn main() {
     let sysloop = EspSystemEventLoop::take().unwrap();
 
     let nvs_partition = nvs::EspDefaultNvsPartition::take().unwrap();
-    let mut _wifi = setupWifi(sysloop, peripherals.modem, nvs_partition.clone());
+    let modem = peripherals.modem;
+    //let mut _wifi = setupWifi(sysloop, modem, nvs_partition.clone());
 
     println!("took nvs partition");
     let mut nvs = nvs::EspNvs::new(nvs_partition, "rtc", true).unwrap();
@@ -270,7 +315,7 @@ fn main() {
         let diff = datetime - last_sync_info.last_sync;
 
         if diff.whole_days() > 1 {
-            //sync_rtc(&mut nvs, &mut rtc);
+            sync_rtc(&mut nvs, &mut rtc);
         }
     }
     else {
@@ -278,7 +323,7 @@ fn main() {
         //sync_rtc(&mut nvs, &mut rtc);
     }
 
-    _wifi.disconnect().unwrap();
+    //_wifi.disconnect().unwrap();
 
     unsafe {
         let result = esp_idf_sys::esp_sleep_enable_ext0_wakeup(gpio_num_t_GPIO_NUM_34, 0);
@@ -298,6 +343,32 @@ fn main() {
         esp_idf_sys::esp_deep_sleep_disable_rom_logging();
         esp_idf_sys::esp_deep_sleep_start();
     };
+}
+
+fn setup_bluetooth() {
+    let ble_device = BLEDevice::take();
+
+    let server = ble_device.get_server();
+    server.on_connect(|_| {
+        ::log::info!("Client connected");
+        ::log::info!("Multi-connect support: start advertising");
+        ble_device.get_advertising().start().unwrap();
+    });
+    let service = server.create_service(uuid128!("fafafafa-fafa-fafa-fafa-fafafafafafa"));
+
+}
+
+fn setupTouchpad<'d, 'a>(reset_pin: AnyIOPin, int_pin: AnyIOPin, i2c: RefCellDevice<'a, I2cDriver<'d>>) -> CST816S<Reverse<RefCellDevice<'a, I2cDriver<'d>>>, PinDriver<'d, AnyIOPin, Input>, PinDriver<'d, AnyIOPin, Output>> {
+    let rst = PinDriver::output(reset_pin).unwrap();
+    let int = PinDriver::input(int_pin).unwrap();
+
+    let mut touchpad = CST816S::new(i2c.reverse(), int, rst);
+
+    let mut delay = Ets;
+
+    touchpad.setup(&mut delay).unwrap();
+
+    touchpad
 }
 
 fn get_wakeup_cause() -> esp_sleep_wakeup_cause_t {
@@ -347,8 +418,8 @@ fn setupWifi(sysloop: EspEventLoop<System>, modem: Modem, nvs_partition: EspNvsP
     return wifi_driver;
 }
 
-fn sync_rtc<T, E>(nvs: &mut EspNvs<NvsDefault>, rtc: &mut PCF8563<T>)
-    where T: Write<Error = E> + WriteRead<Error = E>, E: std::fmt::Debug
+fn sync_rtc(nvs: &mut EspNvs<NvsDefault>, rtc: &mut PCF8563<Reverse<RefCellDevice<I2cDriver>>>)
+//fn sync_rtc<T>(nvs: &mut EspNvs<NvsDefault>, rtc: &mut PCF8563<Reverse<T>>)
 {
     println!("syncing...");
 

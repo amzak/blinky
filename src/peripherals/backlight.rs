@@ -1,4 +1,4 @@
-use embedded_hal::digital::v2::OutputPin;
+use embedded_hal::digital::OutputPin;
 use esp_idf_hal::gpio::{AnyIOPin, Output, Pin, PinDriver};
 
 pub struct Backlight<P> {
