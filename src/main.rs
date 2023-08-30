@@ -1,4 +1,4 @@
-use std::{error::Error, ptr, thread, time::Duration};
+use std::{error::Error, f32, ptr, thread, time::Duration};
 use std::cell::RefCell;
 use std::mem::size_of;
 use std::sync::Mutex;
@@ -58,6 +58,8 @@ use esp_idf_hal::spi::config::DriverConfig;
 use mipidsi::Builder;
 use embedded_hal_compat::{ForwardCompat, Reverse, ReverseCompat};
 
+use serde::{Deserialize, Serialize};
+
 mod peripherals {
     //pub mod gc9a01;
     pub mod bma423ex;
@@ -79,6 +81,34 @@ const LAST_SYNC: &str = "last_sync";
 pub struct LastSyncInfo {
     pub last_sync: OffsetDateTime,
 }
+
+#[derive(Debug, Deserialize, PartialEq)]
+pub struct GpsCoord {
+    pub lat: f32,
+    pub lon: f32
+}
+
+#[derive(Debug, Deserialize, PartialEq)]
+#[repr(u8)]
+pub enum RideType {
+    train,
+    bus
+}
+
+#[derive(Debug, Deserialize, PartialEq)]
+pub struct Ride {
+    pub departureTime: i64,
+    pub arrivalTime: i64,
+
+    pub rideType: RideType,
+    pub delayMinutes: i32,
+    pub route: String,
+    pub from: String,
+    pub to: String
+}
+
+#[link_section = ".rtc.data"]
+static mut CurrentCoords: GpsCoord = GpsCoord {lat: 0.0, lon: 0.0};
 
 fn main() {
     // It is necessary to call this function once. Otherwise some patches to the runtime
@@ -145,6 +175,13 @@ fn main() {
         .unwrap();
 
     Text::new(wakeup_cause_str, Point::new(80, 130), style)
+        .draw(&mut display)
+        .unwrap();
+
+    let coords = get_current_coords();
+    let coords_str = format_current_coords(coords);
+
+    Text::new(&coords_str, Point::new(80, 130), style)
         .draw(&mut display)
         .unwrap();
 
@@ -297,6 +334,8 @@ fn main() {
     let modem = peripherals.modem;
     //let mut _wifi = setupWifi(sysloop, modem, nvs_partition.clone());
 
+    setup_bluetooth();
+
     println!("took nvs partition");
     let mut nvs = nvs::EspNvs::new(nvs_partition, "rtc", true).unwrap();
 
@@ -345,6 +384,12 @@ fn main() {
     };
 }
 
+fn get_current_coords() -> GpsCoord {
+    unsafe {
+        return GpsCoord {lat: CurrentCoords.lat, lon: CurrentCoords.lon};
+    }
+}
+
 fn setup_bluetooth() {
     let ble_device = BLEDevice::take();
 
@@ -354,8 +399,64 @@ fn setup_bluetooth() {
         ::log::info!("Multi-connect support: start advertising");
         ble_device.get_advertising().start().unwrap();
     });
-    let service = server.create_service(uuid128!("fafafafa-fafa-fafa-fafa-fafafafafafa"));
+    let service = server.create_service(uuid128!("5e98f6d5-0837-4147-856f-61873c82da9b"));
 
+    // A static characteristic.
+    let static_characteristic = service.lock().create_characteristic(
+        uuid128!("d4e0e0d0-1a2b-11e9-ab14-d663bd873d93"),
+        NimbleProperties::READ,
+    );
+    static_characteristic
+        .lock()
+        .set_value("Hello, world!".as_bytes());
+
+    // A characteristic that notifies every second.
+    let notifying_characteristic = service.lock().create_characteristic(
+        uuid128!("594429ca-5370-4416-a172-d576986defb3"),
+        NimbleProperties::READ | NimbleProperties::NOTIFY,
+    );
+    notifying_characteristic.lock().set_value(b"Initial value.");
+
+    // A writable characteristic.
+    let writable_characteristic = service
+        .lock()
+        .create_characteristic(
+        uuid128!("3c9a3f00-8ed3-4bdf-8a39-a01bebede295"),
+        NimbleProperties::READ | NimbleProperties::WRITE);
+
+    writable_characteristic
+        .lock()
+        .on_read(move |val, _| {
+            val.set_value("Sample value".as_ref());
+            ::log::info!("Read from writable characteristic.");
+        })
+        .on_write(move |value, _param| {
+            handle_incoming(value);
+        });
+
+    let ble_advertising = ble_device.get_advertising();
+    ble_advertising
+        .name("ESP32-SmartWatchTest-123456")
+        .add_service_uuid(uuid128!("8b3c29a1-7817-44c5-b001-856a40aba114"));
+
+    ble_advertising.start().unwrap();
+
+    for i in 0..60 {
+        notifying_characteristic.lock().set_value(format!("tick {}", i).as_bytes()).notify();
+        thread::sleep(Duration::from_millis(1000));
+    }
+}
+
+fn handle_incoming(buf: &[u8]) {
+    let ride : Ride = rmp_serde::from_slice(buf).unwrap();
+    println!("Wrote to writable characteristic: {:?}", ride);
+
+    /*
+    unsafe
+    {
+        CurrentCoords = coords;
+    }
+    */
 }
 
 fn setupTouchpad<'d, 'a>(reset_pin: AnyIOPin, int_pin: AnyIOPin, i2c: RefCellDevice<'a, I2cDriver<'d>>) -> CST816S<Reverse<RefCellDevice<'a, I2cDriver<'d>>>, PinDriver<'d, AnyIOPin, Input>, PinDriver<'d, AnyIOPin, Output>> {
@@ -387,6 +488,10 @@ fn format_wakeup_cause(cause: esp_sleep_wakeup_cause_t) -> &'static str {
     };
 
     return formatted;
+}
+
+fn format_current_coords(coords: GpsCoord) -> String {
+    return format!("lat: {} lon: {}", coords.lat, coords.lon);
 }
 
 fn setupWifi(sysloop: EspEventLoop<System>, modem: Modem, nvs_partition: EspNvsPartition<NvsDefault>) -> EspWifi<'static> {
