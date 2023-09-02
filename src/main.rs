@@ -65,6 +65,7 @@ mod peripherals {
     pub mod bma423ex;
     pub mod backlight;
     pub mod hal;
+    pub mod display;
     //pub mod cst816s;
     //pub mod pin_wrapper;
 }
@@ -128,62 +129,19 @@ fn main() {
     let mut hal = HAL::new(pin_conf);
 
     let mut delay = Ets;
-    let spi = unsafe { SPI2::new() };
-    let cs = unsafe { Gpio15::new() };
-    let sclk = unsafe { Gpio14::new() };
-    let sdo = unsafe { Gpio13::new() };
-    let rst = PinDriver::input_output_od(unsafe { Gpio27::new() }).unwrap();
-    let dc = PinDriver::input_output_od(unsafe { Gpio19::new() }).unwrap();
-
-    let config = DriverConfig {
-        dma: Dma::Disabled,
-        intr_flags: Default::default(),
-    };
-
-    let driver = SpiDriver::new(spi, sclk, sdo, None::<AnyIOPin>, &config).unwrap();
-
-    let spi_config = esp_idf_hal::spi::config::Config::default()
-        .baudrate(20_000_000.Hz())
-        .write_only(true);
-
-    let spi = SpiDeviceDriver::new(driver, Some(cs), &spi_config).unwrap();
-
-    // create a DisplayInterface from SPI and DC pin, with no manual CS control
-    let di = SPIInterfaceNoCS::new(spi, dc);
-    // create the ILI9486 display driver in rgb666 color mode from the display interface and use a HW reset pin during init
-    let mut display = Builder::gc9a01(di)
-    //let mut display = Builder_GC9A01Rgb565::create(di)
-        .init(&mut delay, Some(rst))
-        .map_err(|_| Box::<dyn Error>::from("display init"))
-        .unwrap();
 
     hal.backlight.on();
-    //let mut backlight = PinDriver::output(unsafe { Gpio21::new() }).unwrap();
-    //backlight.set_high().unwrap();
 
-    // clear the display to black
-    display
-        .clear(Rgb565::BLACK)
-        .map_err(|_| Box::<dyn Error>::from("clear display"))
-        .unwrap();
+    let mut display = hal.display;
 
-    let style = MonoTextStyle::new(&FONT_6X10, Rgb565::WHITE);
-
-    // Create a text at position (20, 30) and draw it using the previously defined style
-    Text::new("Hello, world!", Point::new(80, 120), style)
-        .draw(&mut display)
-        .unwrap();
-
-    Text::new(wakeup_cause_str, Point::new(80, 130), style)
-        .draw(&mut display)
-        .unwrap();
+    display.clear();
+    display.text("Hello, world!", Point::new(80, 120));
+    display.text(wakeup_cause_str, Point::new(80, 130));
 
     let coords = get_current_coords();
     let coords_str = format_current_coords(coords);
 
-    Text::new(&coords_str, Point::new(80, 130), style)
-        .draw(&mut display)
-        .unwrap();
+    display.text(&coords_str, Point::new(80, 140));
 
     let scl = peripherals.pins.gpio25;
     let sda = peripherals.pins.gpio26;
@@ -203,9 +161,7 @@ fn main() {
     let feature_interrupt_status: u8 = interrupt_status.feature.into();
     let interrupt_status_str = format!("int_st {}", feature_interrupt_status);
 
-    Text::new(&interrupt_status_str, Point::new(80, 140), style)
-        .draw(&mut display)
-        .unwrap();
+    display.text(&interrupt_status_str, Point::new(80, 150));
 
     accel_ex.soft_reset(&mut delay).unwrap();
     accel_ex.init(&mut delay).expect("unable to init bma423");
@@ -266,9 +222,8 @@ fn main() {
 
         println!("touch gesture = {:?} x = {} y = {}", touch_event.gesture, x, y);
 
-        Circle::new(Point::new(x, y), 5)
-            .into_styled(PrimitiveStyle::with_fill(Rgb565::RED))
-            .draw(&mut display).unwrap();
+        let circle_style = PrimitiveStyle::with_fill(Rgb565::RED);
+        display.circle(Point::new(x, y), 5, circle_style);
 
         thread::sleep(Duration::from_millis(20));
     }
@@ -306,10 +261,7 @@ fn main() {
 
     print!("rtc: {}", datetime);
 
-    display
-        .clear(Rgb565::WHITE)
-        .map_err(|_| Box::<dyn Error>::from("clear display"))
-        .unwrap();
+    display.clear();
 
     let template = format_description!(
         version = 2,
@@ -319,14 +271,7 @@ fn main() {
     let text = datetime.format(&template).unwrap();
     let style_time = MonoTextStyle::new(&FONT_10X20, Rgb565::BLACK);
 
-    Text::with_alignment(
-        &text,
-        Point::new(120, 120),
-        style_time,
-        embedded_graphics::text::Alignment::Center,
-    )
-    .draw(&mut display)
-    .unwrap();
+    display.text_aligned(&text, Point::new(120, 120), style_time, embedded_graphics::text::Alignment::Center);
 
     let sysloop = EspSystemEventLoop::take().unwrap();
 
@@ -375,7 +320,7 @@ fn main() {
         println!("result {}", result_ext1);
 
         thread::sleep(Duration::from_millis(1500));
-        display.clear(Rgb565::BLACK).unwrap();
+        display.clear();
         hal.backlight.off();
 
         println!("going to deep sleep");
