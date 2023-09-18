@@ -1,17 +1,36 @@
+use std::cell::{Ref, RefCell, RefMut};
+use std::ops::Deref;
+use std::rc::Rc;
+use std::sync::Arc;
 use embedded_hal::digital::OutputPin;
-use esp_idf_hal::gpio::{AnyIOPin, Output, OutputMode, Pin, PinDriver};
+use embedded_hal_bus::i2c::RefCellDevice;
+use esp_idf_hal::gpio::{AnyIOPin, Gpio21, Gpio25, Gpio26, IOPin, Output, OutputMode, Pin, PinDriver};
+use esp_idf_hal::i2c::{I2c, I2C0, I2cConfig, I2cDriver};
 use esp_idf_hal::peripheral::Peripheral;
+use esp_idf_hal::peripherals::Peripherals;
 use esp_idf_hal::spi::SPI2;
+use esp_idf_hal::units::FromValueType;
+
+use crate::peripherals::accelerometer::Accelerometer;
 use crate::peripherals::backlight::Backlight;
 use crate::peripherals::display::ClockDisplay;
+use crate::peripherals::i2c_management::I2cManagement;
+use crate::peripherals::i2c_proxy::I2cProxy;
+
+pub type ClockBacklight<'d> = Backlight<PinDriver<'d, AnyIOPin, Output>>;
 
 pub struct HAL<'d> {
-    pub backlight: Backlight<PinDriver<'d, AnyIOPin, Output>>,
-    pub display: ClockDisplay<'d>
+    backlight: Rc<RefCell<ClockBacklight<'d>>>,
+    display: Rc<RefCell<ClockDisplay<'d>>>,
+    i2c_manager: I2cManagement<'d>,
+}
+
+pub struct Devices<'d> {
+    accelerometer: Rc<RefCell<Accelerometer<'d>>>
 }
 
 pub struct PinConfig {
-    pub backlight: AnyIOPin
+    pub backlight: i32
 }
 
 impl<'d> HAL<'d> {
@@ -24,15 +43,47 @@ impl<'d> HAL<'d> {
         ClockDisplay::create()
     }
 
-    pub fn new(config: PinConfig) -> HAL<'d> {
-        let hal = Self {
-            backlight: Self::init_backlight(config.backlight),
-            display: Self::init_display()
-        };
+    fn init_i2c(i2c: I2C0) -> I2cManagement<'d> {
+        let scl = unsafe { Gpio25::new() };
+        let sda = unsafe { Gpio26::new() };
+        let config = I2cConfig::new().baudrate(100.kHz().into());
 
-        return hal;
+        I2cManagement::create(i2c, scl.downgrade(), sda.downgrade(), config)
     }
 
-    pub fn init(&mut self) {
+    pub fn new(config: PinConfig, peripherals: Peripherals) -> HAL<'d> {
+        let backlightPin = unsafe { AnyIOPin::new(config.backlight) };
+        let backlight = Self::init_backlight(backlightPin);
+        let display = Self::init_display();
+
+        Self {
+            display: Rc::new(RefCell::new(display)),
+            backlight: Rc::new(RefCell::new(backlight)),
+            i2c_manager: Self::init_i2c(peripherals.i2c0)
+        }
+    }
+
+    pub fn display<'b>(&'b mut self) -> Rc<RefCell<ClockDisplay<'d>>> {
+        return Rc::clone(&self.display);
+    }
+
+    pub fn backlight<'b>(&'b mut self) -> Rc<RefCell<ClockBacklight<'d>>> {
+        return Rc::clone(&self.backlight);
+    }
+
+    pub fn get_i2c_proxy(&self) -> Rc<RefCell<I2cDriver<'d>>> {
+        return self.i2c_manager.get_proxy_ref().clone()
+    }
+}
+
+impl<'d> Devices<'d> {
+    pub fn new<'a>(hal: &'a HAL<'d>) -> Devices<'d> {
+        let accel = Accelerometer::create(
+            I2cProxy::new(hal.get_i2c_proxy().clone()),
+            I2cProxy::new(hal.get_i2c_proxy().clone()));
+
+        Self {
+            accelerometer: Rc::new(RefCell::new(accel))
+        }
     }
 }

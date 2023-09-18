@@ -1,7 +1,8 @@
 use std::{error::Error, f32, ptr, thread, time::Duration};
 use std::cell::RefCell;
 use std::mem::size_of;
-use std::sync::Mutex;
+use std::rc::Rc;
+use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 
 //use chrono::{DateTime, FixedOffset, NaiveDateTime, TimeZone};
@@ -49,7 +50,7 @@ use esp_idf_hal::{
     gpio::{self, Output},
     i2c
 };
-use esp_idf_hal::gpio::{Gpio12, Gpio21, Gpio33, Input};
+use esp_idf_hal::gpio::{Gpio12, Gpio21, Gpio33, Input, IOPin};
 use esp_idf_hal::i2c::I2c;
 use esp_idf_svc::log::EspLogger;
 
@@ -66,13 +67,17 @@ mod peripherals {
     pub mod backlight;
     pub mod hal;
     pub mod display;
+    pub mod accelerometer;
+    pub mod i2c_management;
+    pub mod i2c_proxy;
     //pub mod cst816s;
     //pub mod pin_wrapper;
 }
 
 
 use crate::peripherals::bma423ex::{AxesConfig, Bma423Ex, InterruptIOCtlFlags};
-use crate::peripherals::hal::{HAL, PinConfig};
+use crate::peripherals::display::ClockDisplay;
+use crate::peripherals::hal::{Devices, HAL, PinConfig};
 
 const SSID: &str = "HOTBOX-B212";
 const PASS: &str = "0534337688";
@@ -123,26 +128,25 @@ fn main() {
     let peripherals = Peripherals::take().unwrap();
 
     let pin_conf = PinConfig {
-        backlight: peripherals.pins.gpio21.into(),
+        backlight: 21,
     };
 
-    let mut hal = HAL::new(pin_conf);
+    let mut hal= HAL::new(pin_conf, peripherals);
+    //let hal_ref = &hal;
+    //let devices = Devices::new(hal_ref);
 
-    let mut delay = Ets;
+    let backlight = hal.backlight();
+    backlight.borrow_mut().on();
 
-    hal.backlight.on();
-
-    let mut display = hal.display;
-
-    display.clear();
-    display.text("Hello, world!", Point::new(80, 120));
-    display.text(wakeup_cause_str, Point::new(80, 130));
+    hal.display().borrow_mut().clear();
+    hal.display().borrow_mut().text("Hello, world!", Point::new(80, 120));
+    hal.display().borrow_mut().text(wakeup_cause_str, Point::new(80, 130));
 
     let coords = get_current_coords();
     let coords_str = format_current_coords(coords);
 
-    display.text(&coords_str, Point::new(80, 140));
-
+    hal.display().borrow_mut().text(&coords_str, Point::new(80, 140));
+    /*
     let scl = peripherals.pins.gpio25;
     let sda = peripherals.pins.gpio26;
     let config = I2cConfig::new().baudrate(100.kHz().into());
@@ -161,7 +165,7 @@ fn main() {
     let feature_interrupt_status: u8 = interrupt_status.feature.into();
     let interrupt_status_str = format!("int_st {}", feature_interrupt_status);
 
-    display.text(&interrupt_status_str, Point::new(80, 150));
+    hal.display().borrow_mut().text(&interrupt_status_str, Point::new(80, 150));
 
     accel_ex.soft_reset(&mut delay).unwrap();
     accel_ex.init(&mut delay).expect("unable to init bma423");
@@ -195,18 +199,20 @@ fn main() {
 
     let feature_config = accel_ex.get_feature_config().unwrap();
     println!("feature_config = {:02X?}", feature_config);
+    */
 
-    let proxy_touch = RefCellDevice::new(&i2c_ref_cell);
+    /* TOUCHPAD
+    let proxy_touch = HAL::get_proxy(hal.i2c_man().clone());
 
-    let touch_rst = peripherals.pins.gpio33.into();
-    let touch_int = peripherals.pins.gpio12.into();
-    let mut touch = setupTouchpad(touch_rst, touch_int, proxy_touch);
+    let touch_rst = unsafe { Gpio33::new() };
+    let touch_int = unsafe { Gpio12::new() };
+    let mut touch = setupTouchpad(touch_rst.downgrade(), touch_int.downgrade(), proxy_touch);
 
     //let info = touch.get_device_info().unwrap();
     //println!("touch device version = {} info = {:02X?}", info.Version, info.VersionInfo);
 
-    let (ax, ay, az) = accel.get_x_y_z().unwrap();
-    println!("ax = {} ay = {} az = {}", ax, ay, az);
+    //let (ax, ay, az) = accel.get_x_y_z().unwrap();
+    //println!("ax = {} ay = {} az = {}", ax, ay, az);
 
     //let gestAddr = touch.set_gesture_output_address(0x01).unwrap();
     //println!("touch gest addr = {}", gestAddr);
@@ -223,12 +229,16 @@ fn main() {
         println!("touch gesture = {:?} x = {} y = {}", touch_event.gesture, x, y);
 
         let circle_style = PrimitiveStyle::with_fill(Rgb565::RED);
-        display.circle(Point::new(x, y), 5, circle_style);
+        hal.display().borrow_mut().circle(Point::new(x, y), 5, circle_style);
 
         thread::sleep(Duration::from_millis(20));
     }
+    TOUCHPAD */
 
-    let proxy_rtc = RefCellDevice::new(&i2c_ref_cell);
+    /* RTC
+    let proxy_rtc = HAL::get_proxy(hal.i2c_man().clone());
+
+    //let proxy_rtc = RefCellDevice::new(&i2c_ref_cell);
     let mut rtc = PCF8563::new(proxy_rtc.reverse());
 
     let datetime_rtc = DateTime {
@@ -261,7 +271,7 @@ fn main() {
 
     print!("rtc: {}", datetime);
 
-    display.clear();
+    hal.display().borrow_mut().clear();
 
     let template = format_description!(
         version = 2,
@@ -271,12 +281,12 @@ fn main() {
     let text = datetime.format(&template).unwrap();
     let style_time = MonoTextStyle::new(&FONT_10X20, Rgb565::BLACK);
 
-    display.text_aligned(&text, Point::new(120, 120), style_time, embedded_graphics::text::Alignment::Center);
-
+    hal.display().borrow_mut().text_aligned(&text, Point::new(120, 120), style_time, embedded_graphics::text::Alignment::Center);
+    RTC */
     let sysloop = EspSystemEventLoop::take().unwrap();
 
     let nvs_partition = nvs::EspDefaultNvsPartition::take().unwrap();
-    let modem = peripherals.modem;
+    //let modem = peripherals.modem;
     //let mut _wifi = setupWifi(sysloop, modem, nvs_partition.clone());
 
     setup_bluetooth();
@@ -296,11 +306,14 @@ fn main() {
 
         println!("last sync {}", last_sync_info.last_sync);
 
+        /* SYNC
         let diff = datetime - last_sync_info.last_sync;
 
         if diff.whole_days() > 1 {
             sync_rtc(&mut nvs, &mut rtc);
         }
+
+        SYNC */
     }
     else {
         println!("first sync");
@@ -320,8 +333,9 @@ fn main() {
         println!("result {}", result_ext1);
 
         thread::sleep(Duration::from_millis(1500));
-        display.clear();
-        hal.backlight.off();
+        hal.display().borrow_mut().clear();
+
+        backlight.borrow_mut().off();
 
         println!("going to deep sleep");
         esp_idf_sys::esp_deep_sleep_disable_rom_logging();
