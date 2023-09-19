@@ -66,7 +66,7 @@ impl<'d> ClockDisplay<'d> {
     }
 
     pub fn clear(&mut self) {
-        self.display.clear(Rgb565::WHITE)
+        self.display.clear(Rgb565::BLACK)
             .map_err(|_| Box::<dyn Error>::from("clear display"))
             .unwrap();
     }
@@ -101,6 +101,5 @@ impl<'d> ClockDisplay<'d> {
         let style_time = MonoTextStyle::new(&FONT_10X20, Rgb565::BLACK);
 
         self.text_aligned(&text, Point::new(120, 120), style_time, embedded_graphics::text::Alignment::Center);
-
     }
 }

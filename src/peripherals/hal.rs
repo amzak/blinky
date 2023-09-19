@@ -13,6 +13,7 @@ use esp_idf_hal::units::FromValueType;
 
 use crate::peripherals::accelerometer::Accelerometer;
 use crate::peripherals::backlight::Backlight;
+use crate::peripherals::bluetooth::{Bluetooth, BluetoothConfig};
 use crate::peripherals::display::ClockDisplay;
 use crate::peripherals::i2c_management::I2cManagement;
 use crate::peripherals::i2c_proxy::I2cProxy;
@@ -31,13 +32,15 @@ pub struct HAL<'d> {
 pub struct Devices<'d> {
     accelerometer: Rc<RefCell<Accelerometer<'d>>>,
     touchpad: Rc<RefCell<Touchpad<'d>>>,
-    rtc: Rc<RefCell<Rtc<'d>>>
+    rtc: Rc<RefCell<Rtc<'d>>>,
+    bluetooth: Rc<RefCell<Bluetooth>>
 }
 
 pub struct PinConfig {
     pub backlight: i32,
     pub touch_interrupt_pin: i32,
-    pub touch_reset_pin: i32
+    pub touch_reset_pin: i32,
+    pub ble_config: BluetoothConfig
 }
 
 impl<'d> HAL<'d> {
@@ -99,10 +102,13 @@ impl<'d> Devices<'d> {
 
         let rtc = Rtc::create(I2cProxy::new(hal.get_i2c_proxy().clone()));
 
+        let bluetooth = Bluetooth::create(hal.config.ble_config);
+
         Self {
             accelerometer: Rc::new(RefCell::new(accel)),
             touchpad: Rc::new(RefCell::new(touch)),
-            rtc: Rc::new(RefCell::new(rtc))
+            rtc: Rc::new(RefCell::new(rtc)),
+            bluetooth: Rc::new(RefCell::new(bluetooth))
         }
     }
 }

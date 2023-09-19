@@ -60,9 +60,9 @@ use mipidsi::Builder;
 use embedded_hal_compat::{ForwardCompat, Reverse, ReverseCompat};
 
 use serde::{Deserialize, Serialize};
+use crate::peripherals::bluetooth::BluetoothConfig;
 
 mod peripherals {
-    //pub mod gc9a01;
     pub mod bma423ex;
     pub mod backlight;
     pub mod hal;
@@ -72,7 +72,7 @@ mod peripherals {
     pub mod i2c_proxy;
     pub mod touchpad;
     pub mod rtc;
-    //pub mod pin_wrapper;
+    pub mod bluetooth;
 }
 
 
@@ -131,7 +131,8 @@ fn main() {
     let pin_conf = PinConfig {
         backlight: 21,
         touch_interrupt_pin: 12,
-        touch_reset_pin: 33
+        touch_reset_pin: 33,
+        ble_config: BluetoothConfig { }
     };
 
     let mut hal= HAL::new(pin_conf, peripherals);
@@ -155,8 +156,6 @@ fn main() {
     let nvs_partition = nvs::EspDefaultNvsPartition::take().unwrap();
     //let modem = peripherals.modem;
     //let mut _wifi = setupWifi(sysloop, modem, nvs_partition.clone());
-
-    setup_bluetooth();
 
     println!("took nvs partition");
     let mut nvs = nvs::EspNvs::new(nvs_partition, "rtc", true).unwrap();
@@ -214,88 +213,6 @@ fn get_current_coords() -> GpsCoord {
     unsafe {
         return GpsCoord {lat: CurrentCoords.lat, lon: CurrentCoords.lon};
     }
-}
-
-fn setup_bluetooth() {
-    let ble_device = BLEDevice::take();
-
-    let server = ble_device.get_server();
-    server.on_connect(|_| {
-        ::log::info!("Client connected");
-        ::log::info!("Multi-connect support: start advertising");
-        ble_device.get_advertising().start().unwrap();
-    });
-    let service = server.create_service(uuid128!("5e98f6d5-0837-4147-856f-61873c82da9b"));
-
-    // A static characteristic.
-    let static_characteristic = service.lock().create_characteristic(
-        uuid128!("d4e0e0d0-1a2b-11e9-ab14-d663bd873d93"),
-        NimbleProperties::READ,
-    );
-    static_characteristic
-        .lock()
-        .set_value("Hello, world!".as_bytes());
-
-    // A characteristic that notifies every second.
-    let notifying_characteristic = service.lock().create_characteristic(
-        uuid128!("594429ca-5370-4416-a172-d576986defb3"),
-        NimbleProperties::READ | NimbleProperties::NOTIFY,
-    );
-    notifying_characteristic.lock().set_value(b"Initial value.");
-
-    // A writable characteristic.
-    let writable_characteristic = service
-        .lock()
-        .create_characteristic(
-        uuid128!("3c9a3f00-8ed3-4bdf-8a39-a01bebede295"),
-        NimbleProperties::READ | NimbleProperties::WRITE);
-
-    writable_characteristic
-        .lock()
-        .on_read(move |val, _| {
-            val.set_value("Sample value".as_ref());
-            ::log::info!("Read from writable characteristic.");
-        })
-        .on_write(move |value, _param| {
-            handle_incoming(value);
-        });
-
-    let ble_advertising = ble_device.get_advertising();
-    ble_advertising
-        .name("ESP32-SmartWatchTest-123456")
-        .add_service_uuid(uuid128!("8b3c29a1-7817-44c5-b001-856a40aba114"));
-
-    ble_advertising.start().unwrap();
-
-    for i in 0..60 {
-        notifying_characteristic.lock().set_value(format!("tick {}", i).as_bytes()).notify();
-        thread::sleep(Duration::from_millis(1000));
-    }
-}
-
-fn handle_incoming(buf: &[u8]) {
-    let ride : Ride = rmp_serde::from_slice(buf).unwrap();
-    println!("Wrote to writable characteristic: {:?}", ride);
-
-    /*
-    unsafe
-    {
-        CurrentCoords = coords;
-    }
-    */
-}
-
-fn setupTouchpad<'d, 'a>(reset_pin: AnyIOPin, int_pin: AnyIOPin, i2c: RefCellDevice<'a, I2cDriver<'d>>) -> CST816S<Reverse<RefCellDevice<'a, I2cDriver<'d>>>, PinDriver<'d, AnyIOPin, Input>, PinDriver<'d, AnyIOPin, Output>> {
-    let rst = PinDriver::output(reset_pin).unwrap();
-    let int = PinDriver::input(int_pin).unwrap();
-
-    let mut touchpad = CST816S::new(i2c.reverse(), int, rst);
-
-    let mut delay = Ets;
-
-    touchpad.setup(&mut delay).unwrap();
-
-    touchpad
 }
 
 fn get_wakeup_cause() -> esp_sleep_wakeup_cause_t {
