@@ -70,7 +70,7 @@ mod peripherals {
     pub mod accelerometer;
     pub mod i2c_management;
     pub mod i2c_proxy;
-    //pub mod cst816s;
+    pub mod touchpad;
     //pub mod pin_wrapper;
 }
 
@@ -129,11 +129,13 @@ fn main() {
 
     let pin_conf = PinConfig {
         backlight: 21,
+        touch_interrupt_pin: 12,
+        touch_reset_pin: 33
     };
 
     let mut hal= HAL::new(pin_conf, peripherals);
-    //let hal_ref = &hal;
-    //let devices = Devices::new(hal_ref);
+    let hal_ref = &hal;
+    let devices = Devices::new(hal_ref);
 
     let backlight = hal.backlight();
     backlight.borrow_mut().on();
@@ -146,94 +148,6 @@ fn main() {
     let coords_str = format_current_coords(coords);
 
     hal.display().borrow_mut().text(&coords_str, Point::new(80, 140));
-    /*
-    let scl = peripherals.pins.gpio25;
-    let sda = peripherals.pins.gpio26;
-    let config = I2cConfig::new().baudrate(100.kHz().into());
-
-    let i2c_driver = I2cDriver::new(peripherals.i2c0, sda, scl, &config).unwrap();
-
-    let i2c_ref_cell = RefCell::new(i2c_driver);
-
-    let proxy_accel = RefCellDevice::new(&i2c_ref_cell);
-    let mut accel = Bma423::new_with_address(proxy_accel.reverse(), 0x18);
-
-    let proxy_accel_ex = RefCellDevice::new(&i2c_ref_cell);
-    let mut accel_ex = Bma423Ex::new(proxy_accel_ex);
-
-    let interrupt_status = accel.read_interrupt_status().unwrap();
-    let feature_interrupt_status: u8 = interrupt_status.feature.into();
-    let interrupt_status_str = format!("int_st {}", feature_interrupt_status);
-
-    hal.display().borrow_mut().text(&interrupt_status_str, Point::new(80, 150));
-
-    accel_ex.soft_reset(&mut delay).unwrap();
-    accel_ex.init(&mut delay).expect("unable to init bma423");
-
-    let internal_status = accel_ex.read_internal_status().unwrap();
-    println!("internal_status = {}", internal_status);
-
-    accel.set_accel_config(
-        bma423::AccelConfigOdr::Odr100,
-        bma423::AccelConfigBandwidth::NormAvg4,
-        bma423::AccelConfigPerfMode::CicAvg,
-        bma423::AccelRange::Range2g,
-    ).unwrap();
-
-    let axes_config = AxesConfig {
-        x_axis: 0,
-        x_axis_inv: 0,
-        y_axis: 1,
-        y_axis_inv: 1,
-        z_axis: 2,
-        z_axis_inv: 1,
-    };
-
-    accel_ex.remap_axes(axes_config).unwrap();
-    accel_ex.enable_wrist_tilt().unwrap();
-
-    let int1_cfg = accel_ex.configure_int1_io_ctrl(InterruptIOCtlFlags::OutputEn | InterruptIOCtlFlags::Od).unwrap();
-    println!("int1_cfg = {}", int1_cfg);
-
-    accel_ex.map_int1_feature_interrupt(FeatureInterruptStatus::WristWear/* | FeatureInterruptStatus::AnyMotion*/, true).unwrap();
-
-    let feature_config = accel_ex.get_feature_config().unwrap();
-    println!("feature_config = {:02X?}", feature_config);
-    */
-
-    /* TOUCHPAD
-    let proxy_touch = HAL::get_proxy(hal.i2c_man().clone());
-
-    let touch_rst = unsafe { Gpio33::new() };
-    let touch_int = unsafe { Gpio12::new() };
-    let mut touch = setupTouchpad(touch_rst.downgrade(), touch_int.downgrade(), proxy_touch);
-
-    //let info = touch.get_device_info().unwrap();
-    //println!("touch device version = {} info = {:02X?}", info.Version, info.VersionInfo);
-
-    //let (ax, ay, az) = accel.get_x_y_z().unwrap();
-    //println!("ax = {} ay = {} az = {}", ax, ay, az);
-
-    //let gestAddr = touch.set_gesture_output_address(0x01).unwrap();
-    //println!("touch gest addr = {}", gestAddr);
-
-    let mut data: [u8; 10] = [0; 10];
-
-    for i in 0..100 {
-        //touch.get_data_raw(&mut data).unwrap();
-        //println!("touch raw data = {:02X?}", data);
-
-        let touch_event = touch.read_one_touch_event(false).unwrap();
-        let TouchEvent {x,y,..} = touch_event;
-
-        println!("touch gesture = {:?} x = {} y = {}", touch_event.gesture, x, y);
-
-        let circle_style = PrimitiveStyle::with_fill(Rgb565::RED);
-        hal.display().borrow_mut().circle(Point::new(x, y), 5, circle_style);
-
-        thread::sleep(Duration::from_millis(20));
-    }
-    TOUCHPAD */
 
     /* RTC
     let proxy_rtc = HAL::get_proxy(hal.i2c_man().clone());
