@@ -8,10 +8,12 @@ use esp_idf_hal::spi::config::DriverConfig;
 use esp_idf_hal::spi::{Dma, SPI2, SpiDeviceDriver, SpiDriver, SpiSingleDeviceDriver};
 use esp_idf_hal::units::FromValueType;
 use mipidsi::{Builder, Display};
+use time::macros::{datetime, format_description, offset};
 
 use embedded_graphics::{
     mono_font::{
         ascii::{FONT_6X10, FONT_8X13},
+        iso_8859_16::FONT_10X20,
         MonoTextStyle,
     },
     prelude::{*, DrawTarget},
@@ -21,6 +23,7 @@ use embedded_graphics::primitives::{Circle, PrimitiveStyle};
 use embedded_graphics::text::Alignment;
 
 use mipidsi::models::GC9A01;
+use time::OffsetDateTime;
 
 pub type EspSpi1InterfaceNoCS<'d> = SPIInterfaceNoCS<SpiSingleDeviceDriver<'d>, PinDriver<'d, Gpio19, InputOutput>>;
 pub type DisplaySPI2<'d> = Display<EspSpi1InterfaceNoCS<'d>, GC9A01, PinDriver<'d, Gpio27, InputOutput>>;
@@ -69,7 +72,6 @@ impl<'d> ClockDisplay<'d> {
     }
 
     pub fn text_aligned(&mut self, text: &str, coord: Point, style: MonoTextStyle<Rgb565>, alignment: Alignment) {
-
         Text::with_alignment(text, coord, style, alignment)
             .draw(&mut self.display)
             .unwrap();
@@ -89,4 +91,16 @@ impl<'d> ClockDisplay<'d> {
             .draw(&mut self.display).unwrap();
     }
 
+    pub fn test_show_time(&mut self, datetime: OffsetDateTime) {
+        let template = format_description!(
+            version = 2,
+            "[hour repr:24]:[minute]:[second]"
+        );
+
+        let text = datetime.format(&template).unwrap();
+        let style_time = MonoTextStyle::new(&FONT_10X20, Rgb565::BLACK);
+
+        self.text_aligned(&text, Point::new(120, 120), style_time, embedded_graphics::text::Alignment::Center);
+
+    }
 }

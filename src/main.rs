@@ -71,6 +71,7 @@ mod peripherals {
     pub mod i2c_management;
     pub mod i2c_proxy;
     pub mod touchpad;
+    pub mod rtc;
     //pub mod pin_wrapper;
 }
 
@@ -149,54 +150,6 @@ fn main() {
 
     hal.display().borrow_mut().text(&coords_str, Point::new(80, 140));
 
-    /* RTC
-    let proxy_rtc = HAL::get_proxy(hal.i2c_man().clone());
-
-    //let proxy_rtc = RefCellDevice::new(&i2c_ref_cell);
-    let mut rtc = PCF8563::new(proxy_rtc.reverse());
-
-    let datetime_rtc = DateTime {
-        year: 23,
-        month: 1,
-        weekday: 1,
-        day: 1,
-        hours: 0,
-        minutes: 0,
-        seconds: 0,
-    };
-
-    rtc.get_datetime().unwrap();
-
-    let offset = UtcOffset::from_hms(2, 0, 0).unwrap();
-
-    let datetime = Date::from_calendar_date(
-        datetime_rtc.year as i32 + 2000,
-        Month::try_from(datetime_rtc.month).unwrap(),
-        datetime_rtc.day,
-    )
-    .unwrap()
-    .with_hms(
-        datetime_rtc.hours,
-        datetime_rtc.minutes,
-        datetime_rtc.seconds,
-    )
-    .unwrap()
-    .assume_offset(offset);
-
-    print!("rtc: {}", datetime);
-
-    hal.display().borrow_mut().clear();
-
-    let template = format_description!(
-        version = 2,
-        "[hour repr:24]:[minute]:[second]"
-    );
-
-    let text = datetime.format(&template).unwrap();
-    let style_time = MonoTextStyle::new(&FONT_10X20, Rgb565::BLACK);
-
-    hal.display().borrow_mut().text_aligned(&text, Point::new(120, 120), style_time, embedded_graphics::text::Alignment::Center);
-    RTC */
     let sysloop = EspSystemEventLoop::take().unwrap();
 
     let nvs_partition = nvs::EspDefaultNvsPartition::take().unwrap();

@@ -16,6 +16,7 @@ use crate::peripherals::backlight::Backlight;
 use crate::peripherals::display::ClockDisplay;
 use crate::peripherals::i2c_management::I2cManagement;
 use crate::peripherals::i2c_proxy::I2cProxy;
+use crate::peripherals::rtc::Rtc;
 use crate::peripherals::touchpad::{Touchpad, TouchpadConfig};
 
 pub type ClockBacklight<'d> = Backlight<PinDriver<'d, AnyIOPin, Output>>;
@@ -29,7 +30,8 @@ pub struct HAL<'d> {
 
 pub struct Devices<'d> {
     accelerometer: Rc<RefCell<Accelerometer<'d>>>,
-    touchpad: Rc<RefCell<Touchpad<'d>>>
+    touchpad: Rc<RefCell<Touchpad<'d>>>,
+    rtc: Rc<RefCell<Rtc<'d>>>
 }
 
 pub struct PinConfig {
@@ -95,9 +97,12 @@ impl<'d> Devices<'d> {
 
         let touch = Touchpad::create(I2cProxy::new(hal.get_i2c_proxy().clone()), config);
 
+        let rtc = Rtc::create(I2cProxy::new(hal.get_i2c_proxy().clone()));
+
         Self {
             accelerometer: Rc::new(RefCell::new(accel)),
-            touchpad: Rc::new(RefCell::new(touch))
+            touchpad: Rc::new(RefCell::new(touch)),
+            rtc: Rc::new(RefCell::new(rtc))
         }
     }
 }
