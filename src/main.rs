@@ -5,7 +5,6 @@ use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 
-//use chrono::{DateTime, FixedOffset, NaiveDateTime, TimeZone};
 use display_interface_spi::SPIInterfaceNoCS;
 use embedded_graphics::{
     mono_font::{
@@ -38,7 +37,6 @@ use esp_idf_sys::{
 use pcf8563::{DateTime, PCF8563};
 use time::{Date, Month, OffsetDateTime, PrimitiveDateTime, UtcOffset};
 use time::macros::{datetime, format_description, offset};
-//use esp_idf_svc::log;
 use bma423::{Bma423, FeatureInterruptStatus, Features, InterruptLine, PowerControlFlag};
 use cst816s::{CST816S, TouchEvent};
 use embedded_graphics::primitives::{Circle, PrimitiveStyle};
@@ -73,12 +71,14 @@ mod peripherals {
     pub mod touchpad;
     pub mod rtc;
     pub mod bluetooth;
+    pub mod wifi;
 }
 
 
 use crate::peripherals::bma423ex::{AxesConfig, Bma423Ex, InterruptIOCtlFlags};
 use crate::peripherals::display::ClockDisplay;
 use crate::peripherals::hal::{Devices, HAL, PinConfig};
+use crate::peripherals::wifi::WifiConfig;
 
 const SSID: &str = "HOTBOX-B212";
 const PASS: &str = "0534337688";
@@ -132,7 +132,12 @@ fn main() {
         backlight: 21,
         touch_interrupt_pin: 12,
         touch_reset_pin: 33,
-        ble_config: BluetoothConfig { }
+        ble_config: BluetoothConfig { },
+        wifi_config: WifiConfig {
+            is_enabled: false,
+            ssid: String::from(SSID),
+            pass: String::from(PASS)
+        }
     };
 
     let mut hal= HAL::new(pin_conf, peripherals);
@@ -145,48 +150,6 @@ fn main() {
     hal.display().borrow_mut().clear();
     hal.display().borrow_mut().text("Hello, world!", Point::new(80, 120));
     hal.display().borrow_mut().text(wakeup_cause_str, Point::new(80, 130));
-
-    let coords = get_current_coords();
-    let coords_str = format_current_coords(coords);
-
-    hal.display().borrow_mut().text(&coords_str, Point::new(80, 140));
-
-    let sysloop = EspSystemEventLoop::take().unwrap();
-
-    let nvs_partition = nvs::EspDefaultNvsPartition::take().unwrap();
-    //let modem = peripherals.modem;
-    //let mut _wifi = setupWifi(sysloop, modem, nvs_partition.clone());
-
-    println!("took nvs partition");
-    let mut nvs = nvs::EspNvs::new(nvs_partition, "rtc", true).unwrap();
-
-    println!("reading len...");
-
-    let len_opt = nvs.len(LAST_SYNC).map_err(|_| Box::<dyn Error>::from("nvs len error")).unwrap();
-
-    if let Some(len) = len_opt {
-        println!("len = {}", len);
-        let mut buffer = vec![0; len];
-        nvs.get_raw(LAST_SYNC, &mut buffer[..]).unwrap();
-        let last_sync_info: LastSyncInfo = postcard::from_bytes::<LastSyncInfo>(&buffer).unwrap();
-
-        println!("last sync {}", last_sync_info.last_sync);
-
-        /* SYNC
-        let diff = datetime - last_sync_info.last_sync;
-
-        if diff.whole_days() > 1 {
-            sync_rtc(&mut nvs, &mut rtc);
-        }
-
-        SYNC */
-    }
-    else {
-        println!("first sync");
-        //sync_rtc(&mut nvs, &mut rtc);
-    }
-
-    //_wifi.disconnect().unwrap();
 
     unsafe {
         let result = esp_idf_sys::esp_sleep_enable_ext0_wakeup(gpio_num_t_GPIO_NUM_34, 0);
@@ -235,99 +198,4 @@ fn format_wakeup_cause(cause: esp_sleep_wakeup_cause_t) -> &'static str {
 
 fn format_current_coords(coords: GpsCoord) -> String {
     return format!("lat: {} lon: {}", coords.lat, coords.lon);
-}
-
-fn setupWifi(sysloop: EspEventLoop<System>, modem: Modem, nvs_partition: EspNvsPartition<NvsDefault>) -> EspWifi<'static> {
-    let mut wifi_driver = EspWifi::new(modem, sysloop.clone(), Some(nvs_partition)).unwrap();
-
-    wifi_driver
-        .set_configuration(&Configuration::Client(ClientConfiguration {
-            ssid: SSID.into(),
-            password: PASS.into(),
-            ..Default::default()
-        }))
-        .unwrap();
-
-    wifi_driver.start().unwrap();
-    wifi_driver.connect().unwrap();
-
-    println!("after wifi connect");
-
-    while wifi_driver.sta_netif().get_ip_info().unwrap().ip.is_unspecified() {
-        thread::sleep(Duration::from_millis(2000));
-    }
-
-    println!("ip acquired");
-
-    let ip_info = wifi_driver.sta_netif().get_ip_info().unwrap();
-    println!("ip: {}", ip_info.ip);
-    println!("dns: {:?}", ip_info.dns);
-
-    return wifi_driver;
-}
-
-fn sync_rtc(nvs: &mut EspNvs<NvsDefault>, rtc: &mut PCF8563<Reverse<RefCellDevice<I2cDriver>>>)
-//fn sync_rtc<T>(nvs: &mut EspNvs<NvsDefault>, rtc: &mut PCF8563<Reverse<T>>)
-{
-    println!("syncing...");
-
-    let dt = getSntpNow();
-
-    let time = dt.time();
-    let date = dt.date();
-
-    let (year, month, day) = date.to_calendar_date();
-    let (hour, minute, sec, _) = time.as_hms_micro();
-
-    println!("{}-{}-{}", year, month, day);
-    println!("{}:{}:{}", hour, minute, sec);
-
-    let year_rtc = (year - 2000) as u8;
-
-    let rtc_dt = DateTime {
-        day,
-        year: year_rtc,
-        month: month as u8,
-        hours: hour,
-        minutes: minute,
-        seconds: sec,
-        weekday: dt.weekday().number_days_from_monday()
-    };
-
-    rtc.set_datetime(&rtc_dt).unwrap();
-
-    let last_sync = LastSyncInfo {
-        last_sync: dt
-    };
-
-    let buf: Vec<u8> = postcard::to_allocvec(&last_sync).unwrap();
-    nvs.set_raw(LAST_SYNC, &buf).unwrap();
-
-    println!("sync performed, len = {}", buf.len());
-}
-
-fn getSntpNow() -> OffsetDateTime {
-    let sntp = sntp::EspSntp::new_default().unwrap();
-    println!("SNTP initializing...");
-
-    while sntp.get_sync_status() != SyncStatus::Completed {
-        let status = sntp.get_sync_status();
-        println!("{:?}", status);
-        thread::sleep(Duration::from_millis(1000));
-    }
-
-    println!("SNTP ready.");
-
-    let timer: *mut time_t = ptr::null_mut();
-
-    let mut timestamp = 0;
-
-    unsafe {
-        timestamp = esp_idf_sys::time(timer);
-    }
-
-    let mut dt = OffsetDateTime::from_unix_timestamp(timestamp as i64)
-        .unwrap()
-        .to_offset(offset!(+3));
-    dt
 }

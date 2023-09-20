@@ -19,6 +19,7 @@ use crate::peripherals::i2c_management::I2cManagement;
 use crate::peripherals::i2c_proxy::I2cProxy;
 use crate::peripherals::rtc::Rtc;
 use crate::peripherals::touchpad::{Touchpad, TouchpadConfig};
+use crate::peripherals::wifi::{Wifi, WifiConfig};
 
 pub type ClockBacklight<'d> = Backlight<PinDriver<'d, AnyIOPin, Output>>;
 
@@ -26,6 +27,8 @@ pub struct HAL<'d> {
     backlight: Rc<RefCell<ClockBacklight<'d>>>,
     display: Rc<RefCell<ClockDisplay<'d>>>,
     i2c_manager: I2cManagement<'d>,
+    wifi: Rc<RefCell<Wifi>>,
+
     pub config: PinConfig
 }
 
@@ -33,14 +36,15 @@ pub struct Devices<'d> {
     accelerometer: Rc<RefCell<Accelerometer<'d>>>,
     touchpad: Rc<RefCell<Touchpad<'d>>>,
     rtc: Rc<RefCell<Rtc<'d>>>,
-    bluetooth: Rc<RefCell<Bluetooth>>
+    bluetooth: Rc<RefCell<Bluetooth>>,
 }
 
 pub struct PinConfig {
     pub backlight: i32,
     pub touch_interrupt_pin: i32,
     pub touch_reset_pin: i32,
-    pub ble_config: BluetoothConfig
+    pub ble_config: BluetoothConfig,
+    pub wifi_config: WifiConfig
 }
 
 impl<'d> HAL<'d> {
@@ -65,11 +69,13 @@ impl<'d> HAL<'d> {
         let backlightPin = unsafe { AnyIOPin::new(config.backlight) };
         let backlight = Self::init_backlight(backlightPin);
         let display = Self::init_display();
+        let wifi = Wifi::create(config.wifi_config.clone(), peripherals.modem);
 
         Self {
             display: Rc::new(RefCell::new(display)),
             backlight: Rc::new(RefCell::new(backlight)),
             i2c_manager: Self::init_i2c(peripherals.i2c0),
+            wifi: Rc::new(RefCell::new(wifi)),
             config
         }
     }
@@ -108,7 +114,7 @@ impl<'d> Devices<'d> {
             accelerometer: Rc::new(RefCell::new(accel)),
             touchpad: Rc::new(RefCell::new(touch)),
             rtc: Rc::new(RefCell::new(rtc)),
-            bluetooth: Rc::new(RefCell::new(bluetooth))
+            bluetooth: Rc::new(RefCell::new(bluetooth)),
         }
     }
 }
