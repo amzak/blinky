@@ -8,17 +8,18 @@ use esp_idf_hal::delay::Ets;
 use esp_idf_hal::gpio::{Gpio25, Gpio26};
 use esp_idf_hal::i2c::{I2cConfig, I2cDriver, I2cSlaveDriver};
 use esp_idf_hal::units::FromValueType;
+use log::trace;
 use crate::peripherals::bma423ex::{AxesConfig, Bma423Ex, InterruptIOCtlFlags};
 use crate::peripherals::i2c_management::I2cManagement;
-use crate::peripherals::i2c_proxy::I2cProxy;
+use crate::peripherals::i2c_proxy_async::I2cProxyAsync;
 
 pub struct Accelerometer<'a> {
-    accel_base: Bma423<Reverse<I2cProxy<I2cDriver<'a>>>>,
-    accel_ex: Bma423Ex<I2cProxy<I2cDriver<'a>>>
+    accel_base: Bma423<Reverse<I2cProxyAsync<I2cDriver<'a>>>>,
+    accel_ex: Bma423Ex<I2cProxyAsync<I2cDriver<'a>>>
 }
 
 impl<'a> Accelerometer<'a> {
-    pub fn create(proxy: I2cProxy<I2cDriver<'a>>, proxy_ex: I2cProxy<I2cDriver<'a>>) -> Accelerometer<'a> {
+    pub fn create(proxy: I2cProxyAsync<I2cDriver<'a>>, proxy_ex: I2cProxyAsync<I2cDriver<'a>>) -> Accelerometer<'a> {
         let mut accel = Bma423::new_with_address(proxy.reverse(), 0x18);
         let mut accel_ex = Bma423Ex::new(proxy_ex);
 
@@ -28,7 +29,7 @@ impl<'a> Accelerometer<'a> {
         accel_ex.init(&mut delay).expect("unable to init bma423");
 
         let internal_status = accel_ex.read_internal_status().unwrap();
-        println!("internal_status = {}", internal_status);
+        trace!("internal_status = {}", internal_status);
 
         accel.set_accel_config(
             bma423::AccelConfigOdr::Odr100,
@@ -50,12 +51,12 @@ impl<'a> Accelerometer<'a> {
         accel_ex.enable_wrist_tilt().unwrap();
 
         let int1_cfg = accel_ex.configure_int1_io_ctrl(InterruptIOCtlFlags::OutputEn | InterruptIOCtlFlags::Od).unwrap();
-        println!("int1_cfg = {}", int1_cfg);
+        trace!("int1_cfg = {}", int1_cfg);
 
         accel_ex.map_int1_feature_interrupt(FeatureInterruptStatus::WristWear/* | FeatureInterruptStatus::AnyMotion*/, true).unwrap();
 
         let feature_config = accel_ex.get_feature_config().unwrap();
-        println!("feature_config = {:02X?}", feature_config);
+        trace!("feature_config = {:02X?}", feature_config);
 
         Accelerometer {
             accel_base: accel,

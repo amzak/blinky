@@ -1,12 +1,51 @@
+use std::cell::RefCell;
+use std::rc::Rc;
 use std::thread;
 use std::time::Duration;
+use embedded_svc::event_bus::EventBus;
 use esp32_nimble::{BLEDevice, NimbleProperties, uuid128};
+use tokio::sync::broadcast::Sender;
+
+use crate::peripherals::hal::Commands;
 
 pub struct Bluetooth {
-
+    state: BluetoothState,
+    channel: Sender<Commands>
 }
 
 pub struct BluetoothConfig {
+
+}
+
+pub enum BluetoothState {
+    Uninitialized,
+    Idle,
+    Connecting,
+    Syncing,
+    Completed
+}
+
+#[derive(Clone, Debug)]
+struct IncomingData {
+    data: Vec<u8>
+}
+
+#[derive(Clone, Debug)]
+pub struct BluetoothConnectRequest {
+}
+
+pub enum BluetoothConnectResponse {
+    Accepted,
+    Rejected
+}
+
+#[derive(Clone, Debug)]
+pub struct BluetoothConnectEvent {
+
+}
+
+#[derive(Clone, Debug)]
+pub struct BluetoothConnectEvent2 {
 
 }
 
@@ -23,20 +62,18 @@ impl Copy for BluetoothConfig {
 }
 
 impl Bluetooth {
-    pub fn create(config: BluetoothConfig) -> Self {
-
-        Self::setup_bluetooth();
-
+    pub fn create(config: BluetoothConfig, hal_channel: Sender<Commands>) -> Self {
         Self {
-
+            state: BluetoothState::Uninitialized,
+            channel: hal_channel
         }
     }
 
-    fn setup_bluetooth() {
+    async fn setup_bluetooth() {
         let ble_device = BLEDevice::take();
 
         let server = ble_device.get_server();
-        server.on_connect(|_| {
+        server.on_connect(|_, _| {
             ::log::info!("Client connected");
             ::log::info!("Multi-connect support: start advertising");
             ble_device.get_advertising().start().unwrap();
@@ -72,8 +109,8 @@ impl Bluetooth {
                 val.set_value("Sample value".as_ref());
                 ::log::info!("Read from writable characteristic.");
             })
-            .on_write(move |value, _param| {
-                Self::handle_incoming(value);
+            .on_write(move |args| {
+                Self::handle_incoming(args.recv_data);
             });
 
         let ble_advertising = ble_device.get_advertising();
@@ -87,6 +124,29 @@ impl Bluetooth {
             notifying_characteristic.lock().set_value(format!("tick {}", i).as_bytes()).notify();
             thread::sleep(Duration::from_millis(1000));
         }
+    }
+
+    pub async fn start(&self) {
+        let channel = &self.channel;
+        let mut recv = channel.subscribe();
+
+        tokio::spawn(async move {
+            loop {
+                let res= recv.recv().await;
+                let command = res.unwrap();
+
+                match command {
+                    Commands::RequestBluetoothConnection => {
+                        Self::setup_bluetooth().await;
+                    }
+                    _ => {}
+                }
+            }
+        });
+    }
+
+    pub fn request_sync() {
+
     }
 
     fn handle_incoming(buf: &[u8]) {

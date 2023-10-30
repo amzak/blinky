@@ -19,6 +19,7 @@ use embedded_graphics::{
     prelude::{*, DrawTarget},
     text::Text,
 };
+use embedded_graphics::mono_font::MonoFont;
 use embedded_graphics::primitives::{Circle, PrimitiveStyle};
 use embedded_graphics::text::Alignment;
 
@@ -66,7 +67,7 @@ impl<'d> ClockDisplay<'d> {
     }
 
     pub fn clear(&mut self) {
-        self.display.clear(Rgb565::BLACK)
+        self.display.clear(Rgb565::WHITE)
             .map_err(|_| Box::<dyn Error>::from("clear display"))
             .unwrap();
     }

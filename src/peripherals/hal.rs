@@ -1,45 +1,36 @@
 use std::cell::{Ref, RefCell, RefMut};
 use std::ops::Deref;
 use std::rc::Rc;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use embedded_hal::digital::OutputPin;
-use embedded_hal_bus::i2c::RefCellDevice;
+use embedded_hal_bus::i2c::{CriticalSectionDevice, RefCellDevice};
 use esp_idf_hal::gpio::{AnyIOPin, Gpio21, Gpio25, Gpio26, IOPin, Output, OutputMode, Pin, PinDriver};
 use esp_idf_hal::i2c::{I2c, I2C0, I2cConfig, I2cDriver};
 use esp_idf_hal::peripheral::Peripheral;
 use esp_idf_hal::peripherals::Peripherals;
 use esp_idf_hal::spi::SPI2;
 use esp_idf_hal::units::FromValueType;
+use time::{OffsetDateTime, PrimitiveDateTime};
+use crate::modules::reference_time::ReferenceData;
 
 use crate::peripherals::accelerometer::Accelerometer;
 use crate::peripherals::backlight::Backlight;
 use crate::peripherals::bluetooth::{Bluetooth, BluetoothConfig};
 use crate::peripherals::display::ClockDisplay;
 use crate::peripherals::i2c_management::I2cManagement;
-use crate::peripherals::i2c_proxy::I2cProxy;
+use crate::peripherals::i2c_proxy_async::I2cProxyAsync;
 use crate::peripherals::rtc::Rtc;
 use crate::peripherals::touchpad::{Touchpad, TouchpadConfig};
 use crate::peripherals::wifi::{Wifi, WifiConfig};
 
-pub type ClockBacklight<'d> = Backlight<PinDriver<'d, AnyIOPin, Output>>;
-
 pub struct HAL<'d> {
-    backlight: Rc<RefCell<ClockBacklight<'d>>>,
-    display: Rc<RefCell<ClockDisplay<'d>>>,
     i2c_manager: I2cManagement<'d>,
     wifi: Rc<RefCell<Wifi>>,
 
-    pub config: PinConfig
+    pub config: HalConfig
 }
 
-pub struct Devices<'d> {
-    accelerometer: Rc<RefCell<Accelerometer<'d>>>,
-    touchpad: Rc<RefCell<Touchpad<'d>>>,
-    rtc: Rc<RefCell<Rtc<'d>>>,
-    bluetooth: Rc<RefCell<Bluetooth>>,
-}
-
-pub struct PinConfig {
+pub struct HalConfig {
     pub backlight: i32,
     pub touch_interrupt_pin: i32,
     pub touch_reset_pin: i32,
@@ -47,12 +38,11 @@ pub struct PinConfig {
     pub wifi_config: WifiConfig
 }
 
-impl<'d> HAL<'d> {
-    fn init_backlight(backlight_pin: AnyIOPin) -> Backlight<PinDriver<'d, AnyIOPin, Output>> {
-        let pin_driver = PinDriver::output(backlight_pin).unwrap();
-        Backlight::create(pin_driver)
-    }
+pub struct PinConfig {
+    pub backlight: i32
+}
 
+impl<'d> HAL<'d> {
     fn init_display() -> ClockDisplay<'d> {
         ClockDisplay::create()
     }
@@ -65,56 +55,63 @@ impl<'d> HAL<'d> {
         I2cManagement::create(i2c, scl.downgrade(), sda.downgrade(), config)
     }
 
-    pub fn new(config: PinConfig, peripherals: Peripherals) -> HAL<'d> {
-        let backlightPin = unsafe { AnyIOPin::new(config.backlight) };
-        let backlight = Self::init_backlight(backlightPin);
-        let display = Self::init_display();
+    pub fn new(config: HalConfig, peripherals: Peripherals) -> HAL<'d> {
         let wifi = Wifi::create(config.wifi_config.clone(), peripherals.modem);
 
         Self {
-            display: Rc::new(RefCell::new(display)),
-            backlight: Rc::new(RefCell::new(backlight)),
             i2c_manager: Self::init_i2c(peripherals.i2c0),
             wifi: Rc::new(RefCell::new(wifi)),
             config
         }
     }
 
-    pub fn display<'b>(&'b mut self) -> Rc<RefCell<ClockDisplay<'d>>> {
-        return Rc::clone(&self.display);
+    pub fn get_i2c_proxy_async(&self) -> I2cProxyAsync<I2cDriver<'d>> {
+        return self.i2c_manager.get_proxy_ref_async();
     }
 
-    pub fn backlight<'b>(&'b mut self) -> Rc<RefCell<ClockBacklight<'d>>> {
-        return Rc::clone(&self.backlight);
-    }
-
-    pub fn get_i2c_proxy(&self) -> Rc<RefCell<I2cDriver<'d>>> {
-        return self.i2c_manager.get_proxy_ref().clone()
+    pub fn get_touch_config(&self) -> TouchpadConfig {
+        TouchpadConfig {
+            interrupt_pin: self.config.touch_interrupt_pin,
+            reset_pin: self.config.touch_reset_pin
+        }
     }
 }
 
-impl<'d> Devices<'d> {
-    pub fn new<'a>(hal: &'a HAL<'d>) -> Devices<'d> {
-        let accel = Accelerometer::create(
-            I2cProxy::new(hal.get_i2c_proxy().clone()),
-            I2cProxy::new(hal.get_i2c_proxy().clone()));
+#[derive(Clone, Debug)]
+pub enum WakeupCause {
+    Ext0,
+    Ext1,
+    Undef,
+    Timer,
+    Ulp
+}
 
-        let config = TouchpadConfig {
-            interrupt_pin: hal.config.touch_interrupt_pin,
-            reset_pin: hal.config.touch_reset_pin
-        };
+#[derive(Clone, Debug)]
+pub struct TouchPosition {
+    pub x: i32,
+    pub y: i32
+}
 
-        let touch = Touchpad::create(I2cProxy::new(hal.get_i2c_proxy().clone()), config);
+#[derive(Clone, Debug)]
+pub enum Commands {
+    RequestReferenceData,
+    RequestBluetoothConnection,
+    SyncRtc,
+    GetTimeNow,
+    GetReferenceTime,
+    SetTime(OffsetDateTime)
+}
 
-        let rtc = Rtc::create(I2cProxy::new(hal.get_i2c_proxy().clone()));
-
-        let bluetooth = Bluetooth::create(hal.config.ble_config);
-
-        Self {
-            accelerometer: Rc::new(RefCell::new(accel)),
-            touchpad: Rc::new(RefCell::new(touch)),
-            rtc: Rc::new(RefCell::new(rtc)),
-            bluetooth: Rc::new(RefCell::new(bluetooth)),
-        }
-    }
+#[derive(Clone, Debug)]
+pub enum Events {
+    TimeNow(OffsetDateTime),
+    BluetoothConnected,
+    ReferenceData(ReferenceData),
+    ReferenceTime(OffsetDateTime),
+    WakeupCause(WakeupCause),
+    TouchOrMove,
+    PowerDownTimer,
+    ScreenOffTimer,
+    TouchPos(TouchPosition),
+    IncomingData(Vec<u8>)
 }

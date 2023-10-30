@@ -6,9 +6,9 @@ use esp_idf_hal::gpio::{AnyIOPin, Input, Output, PinDriver};
 use esp_idf_hal::i2c::{I2c, I2cDriver};
 use embedded_hal_compat::{Reverse, ReverseCompat};
 
-use crate::peripherals::i2c_proxy::I2cProxy;
+use crate::peripherals::i2c_proxy_async::I2cProxyAsync;
 
-pub type TouchpadDevice<'d> = CST816S<Reverse<I2cProxy<I2cDriver<'d>>>, PinDriver<'d, AnyIOPin, Input>, PinDriver<'d, AnyIOPin, Output>>;
+pub type TouchpadDevice<'d> = CST816S<Reverse<I2cProxyAsync<I2cDriver<'d>>>, PinDriver<'d, AnyIOPin, Input>, PinDriver<'d, AnyIOPin, Output>>;
 
 pub struct Touchpad<'d> {
     device: TouchpadDevice<'d>
@@ -20,7 +20,7 @@ pub struct TouchpadConfig {
 }
 
 impl<'d> Touchpad<'d> {
-    pub fn create(proxy: I2cProxy<I2cDriver<'d>>, config: TouchpadConfig) -> Self {
+    pub fn create(proxy: I2cProxyAsync<I2cDriver<'d>>, config: TouchpadConfig) -> Self {
         let reset_pin = unsafe { AnyIOPin::new(config.reset_pin) };
         let interrupt_pin = unsafe { AnyIOPin::new(config.interrupt_pin) };
 
@@ -38,6 +38,18 @@ impl<'d> Touchpad<'d> {
 
         Self {
             device: touchpad
+        }
+    }
+
+    pub fn try_get_pos(&mut self) -> Option<(i32, i32)> {
+        let touch_event_opt = self.device.read_one_touch_event(false);
+
+        match touch_event_opt {
+            Some(touch_event) => {
+                let TouchEvent {x,y,..} = touch_event;
+                Some((x, y))
+            }
+            None => None
         }
     }
 

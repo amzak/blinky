@@ -1,19 +1,23 @@
-use esp_idf_hal::i2c::I2cDriver;
-use pcf8563::{DateTime, PCF8563};
+use esp_idf_hal::i2c::{I2cDriver, I2cError};
+use pcf8563::{DateTime, PCF8563, Time};
 use embedded_hal_compat::{Reverse, ReverseCompat};
-use time::{Date, Month, OffsetDateTime, UtcOffset};
+use pcf8563::Error::I2C;
+use time::{Date, Month, OffsetDateTime, PrimitiveDateTime, UtcOffset};
 
-use crate::peripherals::i2c_proxy::I2cProxy;
+use crate::peripherals::i2c_proxy_async::I2cProxyAsync;
 
-pub type RtcDevice<'a> = PCF8563<Reverse<I2cProxy<I2cDriver<'a>>>>;
+pub type RtcDevice<'a> = PCF8563<Reverse<I2cProxyAsync<I2cDriver<'a>>>>;
 
 pub struct Rtc<'a> {
     rtc: RtcDevice<'a>
 }
 
+type Error<'a> = &'a str;
+
 impl<'a> Rtc<'a> {
-    pub fn create(proxy: I2cProxy<I2cDriver<'a>>) -> Self {
+    pub fn create(proxy: I2cProxyAsync<I2cDriver<'a>>) -> Self {
         let mut rtc = PCF8563::new(proxy.reverse());
+        rtc.rtc_init().unwrap();
 
         Self {
             rtc
@@ -40,6 +44,33 @@ impl<'a> Rtc<'a> {
             .assume_offset(offset);
 
         datetime
+    }
+
+    pub fn set_now(&mut self, now: PrimitiveDateTime) -> Result<(), Error> {
+        let year = now.year();
+        let rtc_year = if year >= 2000 {
+            year - 2000
+        }
+        else { 0 };
+
+        let dt = DateTime {
+            year: rtc_year as u8,
+            month: now.month().into(),
+            weekday: now.weekday().number_days_from_monday(),
+            day: now.day(),
+            hours: now.hour(),
+            minutes: now.minute(),
+            seconds: now.second()
+        };
+
+        let result = self.rtc.set_datetime(&dt);
+
+        return result.map_err(|err: pcf8563::Error<I2cError>| {
+            match err {
+                I2C(i2c_err) => "i2c error",
+                pcf8563::Error::InvalidInputData => "invalid input data"
+            }
+        });
     }
 
     pub fn test(&mut self) {
