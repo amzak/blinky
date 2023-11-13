@@ -3,8 +3,9 @@ use std::time::Duration;
 use cst816s::{CST816S, TouchEvent};
 use esp_idf_hal::delay::Ets;
 use esp_idf_hal::gpio::{AnyIOPin, Input, Output, PinDriver};
-use esp_idf_hal::i2c::{I2c, I2cDriver};
+use esp_idf_hal::i2c::{I2cDriver};
 use embedded_hal_compat::{Reverse, ReverseCompat};
+use log::debug;
 
 use crate::peripherals::i2c_proxy_async::I2cProxyAsync;
 
@@ -33,16 +34,15 @@ impl<'d> Touchpad<'d> {
 
         touchpad.setup(&mut delay).unwrap();
 
-        //let info = touchpad.get_device_info().unwrap();
-        //println!("touch device version = {} info = {:02X?}", info.Version, info.VersionInfo);
-
         Self {
             device: touchpad
         }
     }
 
     pub fn try_get_pos(&mut self) -> Option<(i32, i32)> {
-        let touch_event_opt = self.device.read_one_touch_event(false);
+        debug!("reading touch event...");
+        let touch_event_opt = self.device.read_one_touch_event(true);
+        debug!("touch event {:?}", touch_event_opt);
 
         match touch_event_opt {
             Some(touch_event) => {
@@ -50,23 +50,6 @@ impl<'d> Touchpad<'d> {
                 Some((x, y))
             }
             None => None
-        }
-    }
-
-    pub fn test(&mut self) {
-        let mut data: [u8; 10] = [0; 10];
-
-        for i in 0..100 {
-            //self.device.get_data_raw(&mut data).unwrap();
-            //println!("touch raw data = {:02X?}", data);
-
-            let mut device = &mut self.device;
-            let touch_event = device.read_one_touch_event(false).unwrap();
-            let TouchEvent {x,y,..} = touch_event;
-
-            println!("touch gesture = {:?} x = {} y = {}", touch_event.gesture, x, y);
-
-            thread::sleep(Duration::from_millis(20));
         }
     }
 }

@@ -1,7 +1,7 @@
 use esp_idf_hal::i2c::I2cDriver;
-use tokio::sync::broadcast::{Sender, Receiver};
-use crate::peripherals::accelerometer::Accelerometer;
-use crate::peripherals::hal::{Commands, Events, TouchPosition};
+use log::info;
+use tokio::sync::broadcast::Sender;
+use crate::peripherals::hal::{Commands, Events};
 use crate::peripherals::i2c_proxy_async::I2cProxyAsync;
 use crate::peripherals::touchpad::{Touchpad, TouchpadConfig};
 
@@ -18,9 +18,17 @@ impl TouchModule {
 
         loop {
             tokio::select! {
+                Ok(command) = recv_cmd.recv() => {
+                    match command {
+                        Commands::StartDeepSleep => {
+                            break;
+                        }
+                        _ => {}
+                    }
+                },
                 Ok(event) = recv_event.recv() => {
                     match event {
-                        Events::TouchOrMove => {
+/*                        Events::TouchOrMove => {
                             if let Some((x,y)) = touchpad.try_get_pos() {
                                 let pos = TouchPosition {
                                     x,
@@ -29,10 +37,12 @@ impl TouchModule {
                                 events.send(Events::TouchPos(pos)).unwrap();
                             }
                         }
-                        _ => {}
+*/                        _ => {}
                     }
                 },
             }
         }
+
+        info!("done.")
     }
 }

@@ -1,14 +1,8 @@
-use std::ops::Deref;
 use esp32_nimble::{BLEDevice, NimbleProperties, uuid128};
 use esp32_nimble::utilities::BleUuid;
 use log::info;
-use time::{Date, PrimitiveDateTime, Time};
-use crate::peripherals::bluetooth::BluetoothConfig;
-use tokio::sync::broadcast::{Sender, Receiver};
+use tokio::sync::broadcast::Sender;
 use crate::peripherals::hal::{Commands, Events};
-
-use tokio::time::{sleep, Duration};
-use crate::modules::reference_data;
 
 pub struct BleModule {
 
@@ -24,27 +18,37 @@ impl BleModule {
     const NOTIFYING_CHARACTERISTIC: BleUuid = uuid128!("594429ca-5370-4416-a172-d576986defb3");
     const RW_CHARACTERISTIC: BleUuid = uuid128!("3c9a3f00-8ed3-4bdf-8a39-a01bebede295");
 
-    pub async fn start(config: BluetoothConfig, commands_channel: Sender<Commands>, events_channel: Sender<Events>) {
+    pub async fn start(commands_channel: Sender<Commands>, events_channel: Sender<Events>) {
         let mut recv_cmd = commands_channel.subscribe();
         let mut recv_events = events_channel.subscribe();
 
         let mut ble_initialized = false;
 
         loop {
-            let res= recv_cmd.recv().await;
-            let command = res.unwrap();
-
-            match command {
-                Commands::RequestReferenceData => {
-                    info!("{:?} {:?}", command, ble_initialized);
-                    if !ble_initialized {
-                        Self::setup_bluetooth(events_channel.clone()).await;
-                        ble_initialized = true;
+            tokio::select! {
+                Ok(command) = recv_cmd.recv() => {
+                    match command {
+                        Commands::RequestReferenceData => {
+                            info!("{:?} {:?}", command, ble_initialized);
+                            if !ble_initialized {
+                                Self::setup_bluetooth(events_channel.clone()).await;
+                                ble_initialized = true;
+                            }
+                        }
+                        Commands::StartDeepSleep => {
+                            break;
+                        }
+                        _ => {}
                     }
                 }
-                _ => {}
             }
         }
+
+        if ble_initialized {
+            BLEDevice::deinit();
+        }
+
+        info!("done.");
     }
 
     async fn setup_bluetooth(events_channel: Sender<Events>) {

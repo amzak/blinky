@@ -1,15 +1,9 @@
-    use std::borrow::Borrow;
-use std::cell::{Ref, RefCell};
-use std::ops::Deref;
-use std::rc::Rc;
-use std::sync::{Arc, Mutex};
-use embedded_hal_bus::i2c::{CriticalSectionDevice, RefCellDevice};
-    use esp_idf_hal::gpio::{AnyInputPin, AnyIOPin, Gpio25, Gpio26, InputOutput, Pin};
-use esp_idf_hal::i2c::{I2C0, I2cConfig, I2cDriver};
+use esp_idf_hal::gpio::AnyIOPin;
+use esp_idf_hal::i2c::{I2C0, I2cDriver};
 use esp_idf_hal::i2c::config::Config;
-    use crate::peripherals::i2c_proxy_async::I2cProxyAsync;
+use crate::peripherals::i2c_proxy_async::I2cProxyAsync;
 
-    pub struct I2cManagement<'a> {
+pub struct I2cManagement<'a> {
     i2c: I2cProxyAsync<I2cDriver<'a>>
 }
 

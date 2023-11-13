@@ -1,10 +1,9 @@
 use std::ops::Add;
-use std::time::SystemTime;
-use time::{OffsetDateTime, PrimitiveDateTime, UtcOffset};
-use tokio::sync::broadcast::{Sender, Receiver};
+use time::{OffsetDateTime, UtcOffset};
+use tokio::sync::broadcast::Sender;
 use crate::peripherals::hal::{Commands, Events};
 use log::info;
-use tokio::time::{sleep, Duration};
+use tokio::time::Duration;
 use serde::{Deserialize};
 
 #[derive(Debug, Deserialize, PartialEq, Clone)]
@@ -38,6 +37,9 @@ impl ReferenceTime {
                             info!("{:?}", command);
                             commands.send(Commands::RequestReferenceData).unwrap();
                         }
+                        Commands::StartDeepSleep => {
+                            break;
+                        }
                         _ => {}
                     }
                 },
@@ -68,5 +70,7 @@ impl ReferenceTime {
                 }
             }
         }
+
+        info!("done.");
     }
 }

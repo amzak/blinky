@@ -1,12 +1,9 @@
-use embedded_hal::digital::OutputPin;
-use esp_idf_hal::gpio::{AnyIOPin, Output, Pin, PinDriver};
+use esp_idf_hal::gpio::{AnyIOPin, Output, PinDriver};
 
 pub struct Backlight<'a> {
     pin: PinDriver<'a, AnyIOPin, Output>,
     is_on: bool
 }
-
-pub type ClockBacklight<'d> = Backlight<'d>;
 
 impl Backlight<'_> {
     pub fn create(backlight_pin: i32) -> Self {

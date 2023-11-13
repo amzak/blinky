@@ -1,14 +1,14 @@
-#![feature(async_closure)]
-
-use log::{debug, info, trace};
-use time::{Duration, OffsetDateTime, PrimitiveDateTime, UtcOffset};
-use tokio::sync::broadcast::{Sender, Receiver};
+use log::{debug, info};
+use time::{Duration, OffsetDateTime, UtcOffset};
+use tokio::sync::broadcast::Sender;
 use crate::peripherals::hal::{Commands, Events};
 use crate::peripherals::nvs_storage::NvsStorage;
-use crate::peripherals::rtc::Rtc;
+use tokio::sync::{Mutex, watch};
+use tokio::select;
+use tokio::time::MissedTickBehavior;
 
-#[derive(PartialEq)]
-pub enum RtcSyncStatus {
+#[derive(PartialEq, Copy, Clone)]
+pub enum RtcSyncState {
     Init,
     InSync,
     AwaitingTimeNow,
@@ -16,7 +16,7 @@ pub enum RtcSyncStatus {
     Aborted
 }
 
-pub struct RtcSync {
+pub struct TimeSync {
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Default)]
@@ -31,9 +31,7 @@ const NVS_NAMESPACE: &str = "rtc_sync";
 const NVS_FIELD: &str = "rtc_sync_info";
 const SYNC_INTERVAL_DAYS: i8 = 1;
 
-type Error<'a> = &'a str;
-
-impl RtcSync
+impl TimeSync
 {
     pub async fn start(commands: Sender<Commands>, events: Sender<Events>) {
         debug!("time_sync module start...");
@@ -41,37 +39,55 @@ impl RtcSync
         let mut recv_cmd = commands.subscribe();
         let mut recv_event = events.subscribe();
 
-        let mut storage = NvsStorage::create(NVS_NAMESPACE);
+        let mut storage = Mutex::new(NvsStorage::create(NVS_NAMESPACE));
 
-        let mut state: RtcSyncStatus = RtcSyncStatus::Init;
-        let mut state_timezone = 0;
+        let state: Mutex<RtcSyncState> = Mutex::new(RtcSyncState::Init);
+        let state_timezone = 0;
 
         //let init_sync_info = RtcSyncInfo::default();
         //storage.write(NVS_FIELD, &init_sync_info).unwrap();
 
+        let cm1 = commands.clone();
+        let (tx, rx) = watch::channel(true);
+
+        let timer = tokio::spawn(Self::run_timer(rx, cm1));
+
         loop {
-            tokio::select! {
+            select! {
                 Ok(command) = recv_cmd.recv() => {
+                    info!("{:?}", command);
                     match command {
                         Commands::SyncRtc => {
-                            info!("{:?}", command);
-                            commands.send(Commands::GetTimeNow).unwrap();
-                            state = RtcSyncStatus::AwaitingTimeNow;
+                            Self::set_state(&state, RtcSyncState::AwaitingTimeNow).await;
+                        }
+                        Commands::StartDeepSleep => {
+                            tx.send(true).unwrap();
+                            break;
+                        }
+                        Commands::PauseRendering => {
+                            tx.send(true).unwrap();
+                        }
+                        Commands::ResumeRendering => {
+                            tx.send(false).unwrap();
                         }
                         _ => {}
                     }
                 },
                 Ok(event) = recv_event.recv() => {
+                    info!("{:?}", event);
                     match event {
                         Events::TimeNow(now) => {
-                            info!("{:?}", event);
-                            if state != RtcSyncStatus::AwaitingTimeNow {
+
+                            if Self::get_state(&state).await != RtcSyncState::AwaitingTimeNow {
                                 continue;
                             }
 
                             let mut is_in_sync = false;
 
-                            if let Ok(sync_info) = storage.read::<RtcSyncInfo>(NVS_FIELD)
+                            if let Ok(sync_info) = storage
+                                .lock()
+                                .await
+                                .read::<RtcSyncInfo>(NVS_FIELD)
                             {
                                 info!("{:?}", sync_info);
                                 let RtcSyncInfo {last_sync, offset, in_sync} = sync_info;
@@ -87,15 +103,14 @@ impl RtcSync
                             is_in_sync = false;
 
                             if is_in_sync {
-                                state = RtcSyncStatus::InSync;
+                                Self::set_state(&state, RtcSyncState::InSync).await;
                             }
                             else {
                                 commands.send(Commands::GetReferenceTime).unwrap();
-                                state = RtcSyncStatus::AwaitingReferenceTime;
+                                Self::set_state(&state, RtcSyncState::AwaitingReferenceTime).await;
                             }
                         }
                         Events::ReferenceTime(now) => {
-                            info!("{:?}", event);
                             commands.send(Commands::SetTime(now)).unwrap();
 
                             let sync_info = RtcSyncInfo {
@@ -104,10 +119,8 @@ impl RtcSync
                                 offset: now.offset().whole_seconds()
                             };
 
-                            storage.write(NVS_FIELD, &sync_info).unwrap();
-                            state = RtcSyncStatus::InSync;
-
-                            break;
+                            storage.lock().await.write(NVS_FIELD, &sync_info).unwrap();
+                            Self::set_state(&state, RtcSyncState::InSync).await;
                         }
                         _ => {}
                     }
@@ -115,6 +128,51 @@ impl RtcSync
             }
         }
 
-        info!("time_sync module stop");
+        timer.abort();
+
+        info!("done.");
+    }
+
+    async fn run_timer(pause_param: watch::Receiver<bool>, commands: Sender<Commands>) {
+        let mut pause = pause_param;
+
+        let mut interval = tokio::time::interval(core::time::Duration::from_secs(1));
+        interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
+
+        info!("before loop");
+
+        //let pause_flag: AtomicBool = AtomicBool::new(false);
+        let mut pause_flag = false;
+
+        loop {
+            select! {
+                Ok(flag) = pause.changed() => {
+                    let val = pause.borrow_and_update();
+                    pause_flag = *val;
+                    //pause_flag.store(*val, Ordering::Relaxed);
+                }
+                _ = interval.tick() => {
+                    if pause_flag { //.load(Ordering::Relaxed) {
+                        info!("pause");
+                        continue;
+                    }
+
+                    info!("tick");
+                    commands.send(Commands::GetTimeNow).unwrap();
+                }
+            }
+        }
+
+        info!("out of tick loop");
+    }
+
+    async fn set_state(state: &Mutex<RtcSyncState>, value: RtcSyncState) {
+        let mut lock = state.lock().await;
+        *lock = value;
+    }
+
+    async fn get_state(state: &Mutex<RtcSyncState>) -> RtcSyncState {
+        let val = state.lock().await;
+        return *val;
     }
 }

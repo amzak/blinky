@@ -1,6 +1,6 @@
 use embedded_svc::storage::RawStorage;
 use esp_idf_svc::nvs;
-use esp_idf_svc::nvs::{EspNvs, EspNvsPartition, NvsDefault};
+use esp_idf_svc::nvs::{EspNvs, NvsDefault};
 use serde::{Deserialize, Serialize};
 
 pub struct NvsStorage {

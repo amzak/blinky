@@ -1,18 +1,15 @@
-use embedded_hal_bus::i2c::CriticalSectionDevice;
-use esp_idf_hal::i2c::{I2cDriver, I2cError};
-use embedded_hal_compat::{Reverse, ReverseCompat};
-use embedded_svc::event_bus::EventBus;
-use time::{Date, Month, OffsetDateTime, PrimitiveDateTime, UtcOffset};
+use esp_idf_hal::i2c::I2cDriver;
+use log::info;
+use time::PrimitiveDateTime;
 use tokio::sync::broadcast::Sender;
 use crate::peripherals::hal::{Commands, Events};
-
 use crate::peripherals::i2c_proxy_async::I2cProxyAsync;
+
 use crate::peripherals::rtc::Rtc;
+use log::debug;
 
 pub struct RtcModule {
 }
-
-type Error<'a> = &'a str;
 
 impl RtcModule {
 
@@ -25,6 +22,7 @@ impl RtcModule {
         loop {
             tokio::select! {
                 Ok(command) = recv_cmd.recv() => {
+                    debug!("{:?}", command);
                     match command {
                         Commands::GetTimeNow => {
                             let datetime = rtc.get_now();
@@ -34,10 +32,15 @@ impl RtcModule {
                             let now = PrimitiveDateTime::new(time.date(), time.time());
                             rtc.set_now(now).unwrap()
                         }
+                        Commands::StartDeepSleep => {
+                            break;
+                        }
                         _ => {}
                     }
                 }
             }
         }
+
+        info!("done");
     }
 }

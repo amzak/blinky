@@ -1,5 +1,5 @@
 use esp_idf_hal::i2c::{I2cDriver, I2cError};
-use pcf8563::{DateTime, PCF8563, Time};
+use pcf8563::{DateTime, PCF8563};
 use embedded_hal_compat::{Reverse, ReverseCompat};
 use pcf8563::Error::I2C;
 use time::{Date, Month, OffsetDateTime, PrimitiveDateTime, UtcOffset};
@@ -71,35 +71,5 @@ impl<'a> Rtc<'a> {
                 pcf8563::Error::InvalidInputData => "invalid input data"
             }
         });
-    }
-
-    pub fn test(&mut self) {
-        self.rtc.get_datetime().unwrap();
-        let offset = UtcOffset::from_hms(2, 0, 0).unwrap();
-
-        let datetime_rtc = DateTime {
-            year: 23,
-            month: 1,
-            weekday: 1,
-            day: 1,
-            hours: 0,
-            minutes: 0,
-            seconds: 0,
-        };
-
-        let datetime = Date::from_calendar_date(
-            datetime_rtc.year as i32 + 2000,
-            Month::try_from(datetime_rtc.month).unwrap(),
-            datetime_rtc.day,
-        )
-        .unwrap()
-        .with_hms(
-            datetime_rtc.hours,
-            datetime_rtc.minutes,
-            datetime_rtc.seconds,
-        )
-        .unwrap()
-        .assume_offset(offset);
-
     }
 }

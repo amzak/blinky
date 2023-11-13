@@ -1,40 +1,23 @@
-use std::cell::{Ref, RefCell, RefMut};
-use std::ops::Deref;
-use std::rc::Rc;
-use std::sync::{Arc, Mutex};
-use embedded_hal::digital::OutputPin;
-use embedded_hal_bus::i2c::{CriticalSectionDevice, RefCellDevice};
-use esp_idf_hal::gpio::{AnyIOPin, Gpio21, Gpio25, Gpio26, IOPin, Output, OutputMode, Pin, PinDriver};
-use esp_idf_hal::i2c::{I2c, I2C0, I2cConfig, I2cDriver};
-use esp_idf_hal::peripheral::Peripheral;
-use esp_idf_hal::peripherals::Peripherals;
-use esp_idf_hal::spi::SPI2;
+use esp_idf_hal::gpio::{Gpio25, Gpio26, IOPin};
+use esp_idf_hal::i2c::{I2C0, I2cConfig, I2cDriver};
 use esp_idf_hal::units::FromValueType;
-use time::{OffsetDateTime, PrimitiveDateTime};
+use time::OffsetDateTime;
 use crate::modules::reference_time::ReferenceData;
-
-use crate::peripherals::accelerometer::Accelerometer;
-use crate::peripherals::backlight::Backlight;
-use crate::peripherals::bluetooth::{Bluetooth, BluetoothConfig};
 use crate::peripherals::display::ClockDisplay;
 use crate::peripherals::i2c_management::I2cManagement;
 use crate::peripherals::i2c_proxy_async::I2cProxyAsync;
-use crate::peripherals::rtc::Rtc;
-use crate::peripherals::touchpad::{Touchpad, TouchpadConfig};
-use crate::peripherals::wifi::{Wifi, WifiConfig};
+use crate::peripherals::touchpad::TouchpadConfig;
+use crate::peripherals::wifi::WifiConfig;
 
 pub struct HAL<'d> {
     i2c_manager: I2cManagement<'d>,
-    wifi: Rc<RefCell<Wifi>>,
-
-    pub config: HalConfig
+    pub config: HalConfig,
 }
 
 pub struct HalConfig {
     pub backlight: i32,
     pub touch_interrupt_pin: i32,
     pub touch_reset_pin: i32,
-    pub ble_config: BluetoothConfig,
     pub wifi_config: WifiConfig
 }
 
@@ -55,12 +38,11 @@ impl<'d> HAL<'d> {
         I2cManagement::create(i2c, scl.downgrade(), sda.downgrade(), config)
     }
 
-    pub fn new(config: HalConfig, peripherals: Peripherals) -> HAL<'d> {
-        let wifi = Wifi::create(config.wifi_config.clone(), peripherals.modem);
+    pub fn new(config: HalConfig, peripherals: I2C0) -> HAL<'d> {
+        //let wifi = Wifi::create(config.wifi_config.clone(), peripherals.modem);
 
         Self {
-            i2c_manager: Self::init_i2c(peripherals.i2c0),
-            wifi: Rc::new(RefCell::new(wifi)),
+            i2c_manager: Self::init_i2c(peripherals),
             config
         }
     }
@@ -77,12 +59,15 @@ impl<'d> HAL<'d> {
     }
 }
 
+#[derive(PartialEq)]
 #[derive(Clone, Debug)]
 pub enum WakeupCause {
+    Undef,
+    All,
     Ext0,
     Ext1,
-    Undef,
     Timer,
+    Touch,
     Ulp
 }
 
@@ -99,7 +84,10 @@ pub enum Commands {
     SyncRtc,
     GetTimeNow,
     GetReferenceTime,
-    SetTime(OffsetDateTime)
+    SetTime(OffsetDateTime),
+    StartDeepSleep,
+    PauseRendering,
+    ResumeRendering
 }
 
 #[derive(Clone, Debug)]
@@ -108,10 +96,11 @@ pub enum Events {
     BluetoothConnected,
     ReferenceData(ReferenceData),
     ReferenceTime(OffsetDateTime),
-    WakeupCause(WakeupCause),
+    Wakeup(WakeupCause),
     TouchOrMove,
-    PowerDownTimer,
-    ScreenOffTimer,
     TouchPos(TouchPosition),
-    IncomingData(Vec<u8>)
+    IncomingData(Vec<u8>),
+    Temperature(f32),
+    BatteryLevel(u16),
+    Charging(bool),
 }

@@ -1,8 +1,6 @@
 use std::cell::RefCell;
-use std::rc::Rc;
 use std::sync::{Arc};
 use embedded_hal::i2c::{ErrorType, I2c};
-use esp_idf_hal::i2c::I2cDriver;
 use critical_section::Mutex;
 
 pub struct I2cProxyAsync<T> {

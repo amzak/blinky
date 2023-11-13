@@ -1,9 +1,9 @@
-use bma423::{Error, FeatureInterruptStatus, PowerConfigurationFlag, PowerControlFlag, State};
+use std::f32;
+use bma423::{FeatureInterruptStatus, PowerConfigurationFlag, PowerControlFlag};
 
 use bitmask_enum::bitmask;
-use embedded_hal::i2c::{I2c, Error as I2cError};
+use embedded_hal::i2c::I2c;
 use embedded_hal::delay::DelayUs;
-use esp_idf_sys::{EspError, netif_ext_callback_args_t_ipv6_set_s};
 use num_enum::{IntoPrimitive};
 
 const BMA423_CONFIG_FILE: [u8; 6144] = [
@@ -402,15 +402,18 @@ pub struct Bma423Ex<I2C> {
 enum Reg {
     ChipId = 0x00,
     ErrReg = 0x02,
-    InternalStatus = 0x2A,
+    InternalStatus = 0x2a,
+    Int0Status = 0x1c,
+    Temperature = 0x22,
     Interrupt1IOCtl = 0x53,
     Interrupt2IOCtl = 0x54,
+    InterruptMode = 0x55,
     FeatureInterrupt1Mapping = 0x56,
     StartInitialization = 0x59,
     Bma4Reserved5BAddr = 0x5b,
     Bma4Reserved5CAddr = 0x5c,
-    FeatureConfig = 0x5E,
-    Cmd = 0x7E,
+    FeatureConfig = 0x5e,
+    Cmd = 0x7e,
     PowerConfiguration = 0x7c,
     PowerControl = 0x7d,
 }
@@ -423,6 +426,13 @@ pub enum InterruptIOCtlFlags {
     Od = Self(0b0000_0100),
     OutputEn = Self(0b0000_1000),
     InputEn = Self(0b0001_0000),
+}
+
+#[bitmask(u8)]
+#[derive(Debug, Clone, Copy, IntoPrimitive)]
+pub enum InterruptMode {
+    NonLatched = Self(0b0000_0000),
+    Latched = Self(0b0000_0001)
 }
 
 #[repr(usize)]
@@ -533,11 +543,11 @@ impl<I2C: I2c> Bma423Ex<I2C>
         Ok(())
     }
 
-    pub fn get_feature_config(&mut self) -> Result<(Vec<u8>), I2C::Error> {
+    pub fn get_feature_config(&mut self) -> Result<Vec<u8>, I2C::Error> {
         let mut feature_config: [u8; FEATURE_SIZE + 1] = [0; FEATURE_SIZE + 1];
         feature_config[0] = Reg::FeatureConfig.into();
         self.write_read(Reg::FeatureConfig, &mut feature_config[1..])?;
-        Ok(Vec::from((feature_config)))
+        Ok(Vec::from(feature_config))
     }
 
     pub fn read_internal_status(&mut self) -> Result<u8, I2C::Error> {
@@ -567,7 +577,7 @@ impl<I2C: I2c> Bma423Ex<I2C>
         Ok(())
     }
 
-    pub fn get_err_reg(&mut self) -> Result<(u8), I2C::Error> {
+    pub fn get_err_reg(&mut self) -> Result<u8, I2C::Error> {
         let mut data: [u8; 1] = [0];
         self.write_read(Reg::ErrReg, &mut data)?;
         return Ok(data[0]);
@@ -588,6 +598,10 @@ impl<I2C: I2c> Bma423Ex<I2C>
 
     pub fn set_power_config(&mut self, value: PowerConfigurationFlag) -> Result<(), I2C::Error> {
         self.write(&[Reg::PowerConfiguration.into(), value.into()])
+    }
+
+    pub fn set_interrupt_mode(&mut self, value: InterruptMode) -> Result<(), I2C::Error> {
+        self.write(&[Reg::InterruptMode.into(), value.into()])
     }
 
     fn stream_write(&mut self, reg: Reg, data: &[u8], delay: &mut impl DelayUs) -> Result<(), I2C::Error> {
@@ -632,5 +646,24 @@ impl<I2C: I2c> Bma423Ex<I2C>
         self.set_power_control(PowerControlFlag::Accelerometer)?;
 
         Ok(())
+    }
+
+    pub fn read_int0_status(&mut self) -> Result<FeatureInterruptStatus, I2C::Error> {
+        let mut data: [u8; 1] = [0];
+        self.write_read(Reg::Int0Status, &mut data)?;
+
+        return Ok(data[0].into());
+    }
+
+    const BMA4_SCALE_TEMP: i32 = 1000;
+    const BMA4_OFFSET_TEMP: i32 = 23;
+
+    pub fn read_temperature(&mut self) -> Result<f32, I2C::Error> {
+        let mut data: [u8; 1] = [0];
+        self.write_read(Reg::Temperature, &mut data)?;
+
+        let tempr_raw = (data[0] as i32 + Self::BMA4_OFFSET_TEMP) * Self::BMA4_SCALE_TEMP;
+
+        return Ok(tempr_raw as f32 / Self::BMA4_SCALE_TEMP as f32);
     }
 }

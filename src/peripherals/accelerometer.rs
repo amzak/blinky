@@ -1,16 +1,9 @@
-use std::cell::{Ref, RefCell};
-use std::rc::Rc;
 use bma423::{Bma423, FeatureInterruptStatus};
-use embedded_hal::i2c::I2c;
-use embedded_hal_bus::i2c::RefCellDevice;
 use embedded_hal_compat::{Reverse, ReverseCompat};
 use esp_idf_hal::delay::Ets;
-use esp_idf_hal::gpio::{Gpio25, Gpio26};
-use esp_idf_hal::i2c::{I2cConfig, I2cDriver, I2cSlaveDriver};
-use esp_idf_hal::units::FromValueType;
-use log::trace;
+use esp_idf_hal::i2c::I2cDriver;
+use log::{debug, trace};
 use crate::peripherals::bma423ex::{AxesConfig, Bma423Ex, InterruptIOCtlFlags};
-use crate::peripherals::i2c_management::I2cManagement;
 use crate::peripherals::i2c_proxy_async::I2cProxyAsync;
 
 pub struct Accelerometer<'a> {
@@ -51,16 +44,24 @@ impl<'a> Accelerometer<'a> {
         accel_ex.enable_wrist_tilt().unwrap();
 
         let int1_cfg = accel_ex.configure_int1_io_ctrl(InterruptIOCtlFlags::OutputEn | InterruptIOCtlFlags::Od).unwrap();
-        trace!("int1_cfg = {}", int1_cfg);
+        debug!("int1_cfg = {}", int1_cfg);
 
         accel_ex.map_int1_feature_interrupt(FeatureInterruptStatus::WristWear/* | FeatureInterruptStatus::AnyMotion*/, true).unwrap();
 
         let feature_config = accel_ex.get_feature_config().unwrap();
-        trace!("feature_config = {:02X?}", feature_config);
+        debug!("feature_config = {:02X?}", feature_config);
 
         Accelerometer {
             accel_base: accel,
             accel_ex
         }
+    }
+
+    pub fn read_interrupt_status(&mut self) -> FeatureInterruptStatus {
+        self.accel_ex.read_int0_status().unwrap()
+    }
+
+    pub fn read_temperature(&mut self) -> f32 {
+        self.accel_ex.read_temperature().unwrap()
     }
 }
