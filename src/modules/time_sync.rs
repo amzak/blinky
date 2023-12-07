@@ -141,24 +141,25 @@ impl TimeSync
 
         info!("before loop");
 
-        //let pause_flag: AtomicBool = AtomicBool::new(false);
         let mut pause_flag = false;
+
+        let commands_wlock = Mutex::new(commands);
 
         loop {
             select! {
                 Ok(flag) = pause.changed() => {
                     let val = pause.borrow_and_update();
                     pause_flag = *val;
-                    //pause_flag.store(*val, Ordering::Relaxed);
                 }
                 _ = interval.tick() => {
-                    if pause_flag { //.load(Ordering::Relaxed) {
+                    if pause_flag {
                         info!("pause");
                         continue;
                     }
 
                     info!("tick");
-                    commands.send(Commands::GetTimeNow).unwrap();
+
+                    commands_wlock.lock().await.send(Commands::GetTimeNow).unwrap();
                 }
             }
         }

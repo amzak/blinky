@@ -8,7 +8,6 @@ use esp_idf_hal::spi::config::DriverConfig;
 use esp_idf_hal::spi::{Dma, SPI2, SpiDeviceDriver, SpiDriver, SpiSingleDeviceDriver};
 use esp_idf_hal::units::FromValueType;
 use mipidsi::{Builder, Display};
-
 use embedded_graphics::{
     mono_font::{
         ascii::FONT_6X10,
@@ -16,6 +15,7 @@ use embedded_graphics::{
     },
     prelude::{*, DrawTarget},
     text::Text,
+    image::Image
 };
 use embedded_graphics::primitives::{Circle, PrimitiveStyle, Rectangle};
 use embedded_graphics::text::Alignment;
@@ -28,6 +28,9 @@ pub type DisplaySPI2<'d> = Display<EspSpi1InterfaceNoCS<'d>, GC9A01, PinDriver<'
 pub struct ClockDisplay<'d> {
     display: DisplaySPI2<'d>,
     buffer: Box<[Rgb565]>
+}
+
+impl<'d> ClockDisplay<'d> {
 }
 
 const FRAME_BUFFER_WIDTH: usize = 240;
@@ -132,5 +135,17 @@ impl<'d> ClockDisplay<'d> {
         Circle::new(coord, diameter)
             .into_styled(style)
             .draw(&mut self.display).unwrap();
+    }
+
+    pub fn icon(&mut self, coord: Point, icon: &impl ImageDrawable<Color = Rgb565>) {
+        Image::new(icon, coord)
+            .draw(&mut self.display)
+            .unwrap();
+    }
+}
+
+impl Drop for ClockDisplay<'_> {
+    fn drop(&mut self) {
+        self.clear();
     }
 }

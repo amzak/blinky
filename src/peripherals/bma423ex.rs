@@ -666,4 +666,10 @@ impl<I2C: I2c> Bma423Ex<I2C>
 
         return Ok(tempr_raw as f32 / Self::BMA4_SCALE_TEMP as f32);
     }
+
+    pub fn reset_and_init(&mut self, delay: &mut impl DelayUs) -> Result<(), I2C::Error> {
+        self.soft_reset(delay)?;
+        self.init(delay)?;
+        Ok(())
+    }
 }

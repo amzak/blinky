@@ -116,9 +116,7 @@ impl PowerModule {
             info!("after light sleep, wakeup_cause {:?}", wakeup_cause);
 
             if wakeup_cause == WakeupCause::Timer {
-                info!("before send StartDeepSleep");
                 commands.send(Commands::StartDeepSleep).unwrap();
-                info!("after send StartDeepSleep");
                 break;
             }
 

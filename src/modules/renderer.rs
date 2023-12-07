@@ -9,10 +9,14 @@ use time::macros::format_description;
 use embedded_graphics::{
     prelude::*,
 };
-use embedded_graphics::pixelcolor::Rgb565;
+use embedded_graphics::pixelcolor::{Rgb565};
 use log::info;
 use profont::PROFONT_24_POINT;
-use tokio::sync::Semaphore;
+
+use embedded_icon::prelude::*;
+use embedded_icon::mdi::size18px::*;
+
+use std::sync::mpsc::channel;
 
 pub struct Renderer {
 
@@ -23,18 +27,15 @@ impl Renderer {
         let mut recv_cmd = commands.subscribe();
         let mut recv_event = events.subscribe();
 
-        let mut display = ClockDisplay::create();
-
         let mut pause = false;
 
-        let semaphore = Semaphore::new(1);
+        let (tx, rx) = channel::<Events>();
 
-        display.clear();
+        let render_loop_task = tokio::task::spawn_blocking(move || { Self::render_loop(rx); });
 
         loop {
             tokio::select! {
                 Ok(command) = recv_cmd.recv() => {
-                    let _s = semaphore.acquire().await.unwrap();
                     match command {
                         Commands::PauseRendering => {
                             pause = true;
@@ -43,7 +44,11 @@ impl Renderer {
                             pause = false;
                         }
                         Commands::StartDeepSleep => {
+                            tx.send(Events::Term).unwrap();
                             break;
+                        }
+                        Commands::SyncRtc => {
+                            //Renderer::render_sync_status(&mut display, true);
                         }
                         _ => {}
                     }
@@ -52,28 +57,13 @@ impl Renderer {
                     if pause {
                         continue;
                     }
-                    let _s = semaphore.acquire().await.unwrap();
 
-                    match event {
-                        Events::TimeNow(now) => {
-                            Renderer::render_time(&mut display, now);
-                        }
-                        Events::Temperature(tmpr) => {
-                            Renderer::render_temperature(&mut display, tmpr);
-                        }
-                        Events::BatteryLevel(level) => {
-                            Renderer::render_battery_level(&mut display, level);
-                        }
-                        Events::Charging(is_charging) => {
-                            Renderer::render_charging_status(&mut display, is_charging);
-                        }
-                        _ => {}
-                    }
+                    tx.send(event).unwrap();
                 }
             }
         }
 
-        display.clear();
+        render_loop_task.await.unwrap();
 
         info!("done");
     }
@@ -116,5 +106,50 @@ impl Renderer {
         let style_time = MonoTextStyle::new(&embedded_graphics::mono_font::iso_8859_1::FONT_8X13, Rgb565::BLACK);
 
         display.text_aligned(&text, Point::new(90, 160), style_time, embedded_graphics::text::Alignment::Center);
+    }
+
+    pub fn render_sync_status(display: &mut ClockDisplay, status: bool) {
+        let color = if status { Rgb565::BLACK } else { Rgb565::WHITE };
+
+        let icon = Sync::new(color);
+
+        display.icon(Point::new(120 - 18 / 2, 10), &icon);
+    }
+
+    fn render_loop(mut rx: std::sync::mpsc::Receiver<Events>) {
+        let mut display= ClockDisplay::create();
+
+        display.clear();
+
+        loop {
+            let event = rx.recv().unwrap();
+
+            if matches!(event, Events::Term) {
+                break;
+            }
+
+            Self::render_change(&mut display, event)
+        }
+    }
+
+    fn render_change(display: &mut ClockDisplay, event: Events) {
+        match event {
+            Events::TimeNow(now) => {
+                Renderer::render_time(display, now);
+            }
+            Events::Temperature(tmpr) => {
+                Renderer::render_temperature(display, tmpr);
+            }
+            Events::BatteryLevel(level) => {
+                Renderer::render_battery_level(display, level);
+            }
+            Events::Charging(is_charging) => {
+                Renderer::render_charging_status(display, is_charging);
+            }
+            Events::ReferenceTime(_) => {
+                Renderer::render_sync_status(display, false);
+            }
+            _ => {}
+        }
     }
 }

@@ -2,27 +2,51 @@ use bma423::{Bma423, FeatureInterruptStatus};
 use embedded_hal_compat::{Reverse, ReverseCompat};
 use esp_idf_hal::delay::Ets;
 use esp_idf_hal::i2c::I2cDriver;
-use log::{debug, trace};
+use log::{debug, trace, info};
 use crate::peripherals::bma423ex::{AxesConfig, Bma423Ex, InterruptIOCtlFlags};
 use crate::peripherals::i2c_proxy_async::I2cProxyAsync;
+use tokio::time::{sleep, Duration};
+use crate::error::Error;
 
 pub struct Accelerometer<'a> {
     accel_base: Bma423<Reverse<I2cProxyAsync<I2cDriver<'a>>>>,
+    accel_ex: Bma423Ex<I2cProxyAsync<I2cDriver<'a>>>,
+    proxy: I2cProxyAsync<I2cDriver<'a>>
+}
+
+pub struct Thermometer<'a> {
     accel_ex: Bma423Ex<I2cProxyAsync<I2cDriver<'a>>>
 }
 
 impl<'a> Accelerometer<'a> {
-    pub fn create(proxy: I2cProxyAsync<I2cDriver<'a>>, proxy_ex: I2cProxyAsync<I2cDriver<'a>>) -> Accelerometer<'a> {
+    pub async fn create(proxy: I2cProxyAsync<I2cDriver<'a>>, proxy_ex: I2cProxyAsync<I2cDriver<'a>>) -> Result<Accelerometer<'a>, Error> {
+        let thermo_proxy = proxy.clone();
         let mut accel = Bma423::new_with_address(proxy.reverse(), 0x18);
         let mut accel_ex = Bma423Ex::new(proxy_ex);
 
         let mut delay = Ets;
 
-        accel_ex.soft_reset(&mut delay).unwrap();
-        accel_ex.init(&mut delay).expect("unable to init bma423");
+        let mut counter = 0;
+
+        loop {
+            if let Err(err) = accel_ex.reset_and_init(&mut delay) {
+
+                info!("err {}", err.cause());
+                if counter > 3 {
+                    return Err(Error::from(err));
+                }
+
+                sleep(Duration::from_millis(20)).await;
+                counter += 1;
+                continue;
+            }
+            else {
+                break;
+            }
+        }
 
         let internal_status = accel_ex.read_internal_status().unwrap();
-        trace!("internal_status = {}", internal_status);
+        info!("internal_status = {}", internal_status);
 
         accel.set_accel_config(
             bma423::AccelConfigOdr::Odr100,
@@ -51,17 +75,30 @@ impl<'a> Accelerometer<'a> {
         let feature_config = accel_ex.get_feature_config().unwrap();
         debug!("feature_config = {:02X?}", feature_config);
 
-        Accelerometer {
+        let accel = Accelerometer {
             accel_base: accel,
-            accel_ex
-        }
+            accel_ex,
+            proxy: thermo_proxy
+        };
+
+        Ok(accel)
     }
 
     pub fn read_interrupt_status(&mut self) -> FeatureInterruptStatus {
         self.accel_ex.read_int0_status().unwrap()
     }
 
+    pub fn get_thermometer(&self) -> Thermometer<'a> {
+        Thermometer {
+            accel_ex: Bma423Ex::new(self.proxy.clone())
+        }
+    }
+}
+
+impl<'a> Thermometer<'a> {
     pub fn read_temperature(&mut self) -> f32 {
-        self.accel_ex.read_temperature().unwrap()
+        let t = self.accel_ex.read_temperature().unwrap();
+
+        return t;
     }
 }

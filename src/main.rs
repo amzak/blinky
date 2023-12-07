@@ -100,6 +100,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     set_max_level(LevelFilter::Info);
     set_target_level("spi_master", LevelFilter::Error).unwrap();
 
+    /*
     unsafe {
         let is_init = esp_idf_sys::esp_spiram_is_initialized();
         let size = esp_idf_sys::esp_spiram_get_size();
@@ -107,10 +108,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         info!("{} {} {}", is_init, size, chip_size);
     }
+    */
 
     let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_time()
-        .worker_threads(2)
+        .worker_threads(4)
         .thread_stack_size(30 * 1024)
         .build()?;
 
@@ -141,8 +143,8 @@ async fn main_async() -> Result<(), Box<dyn std::error::Error>> {
         }
     };
 
-    let (commands_sender, _) = broadcast::channel::<Commands>(16);
-    let (events_sender, _) = broadcast::channel::<Events>(16);
+    let (commands_sender, _) = broadcast::channel::<Commands>(32);
+    let (events_sender, _) = broadcast::channel::<Events>(32);
 
     let mut hal= HAL::new(hal_conf, peripherals.i2c0);
 
@@ -224,6 +226,7 @@ async fn main_async() -> Result<(), Box<dyn std::error::Error>> {
 
     let startup_sequence = tokio::spawn(async move {
         commands_channel.send(Commands::SyncRtc).unwrap();
+        commands_channel.send(Commands::GetTemperature).unwrap();
     });
 
     info!("before join");

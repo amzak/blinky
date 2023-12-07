@@ -87,7 +87,8 @@ pub enum Commands {
     SetTime(OffsetDateTime),
     StartDeepSleep,
     PauseRendering,
-    ResumeRendering
+    ResumeRendering,
+    GetTemperature
 }
 
 #[derive(Clone, Debug)]
@@ -103,4 +104,5 @@ pub enum Events {
     Temperature(f32),
     BatteryLevel(u16),
     Charging(bool),
+    Term
 }
