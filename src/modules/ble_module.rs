@@ -1,12 +1,11 @@
-use esp32_nimble::{BLEDevice, NimbleProperties, uuid128};
-use esp32_nimble::utilities::BleUuid;
-use log::info;
-use tokio::sync::broadcast::Sender;
 use crate::peripherals::hal::{Commands, Events};
+use esp32_nimble::utilities::BleUuid;
+use esp32_nimble::{uuid128, BLEDevice, NimbleProperties};
+use log::{error, info};
+use std::sync::mpsc::channel;
+use tokio::sync::broadcast::Sender;
 
-pub struct BleModule {
-
-}
+pub struct BleModule {}
 
 impl BleModule {
     const DEVICE_NAME: &str = "ESP32-SmartWatchTest-123456";
@@ -20,22 +19,22 @@ impl BleModule {
 
     pub async fn start(commands_channel: Sender<Commands>, events_channel: Sender<Events>) {
         let mut recv_cmd = commands_channel.subscribe();
-        let mut recv_events = events_channel.subscribe();
 
-        let mut ble_initialized = false;
+        let (tx, rx) = channel::<Commands>();
+
+        let ble_task = tokio::task::spawn_blocking(move || {
+            Self::setup_bluetooth(events_channel.clone(), rx);
+        });
 
         loop {
             tokio::select! {
                 Ok(command) = recv_cmd.recv() => {
                     match command {
                         Commands::RequestReferenceData => {
-                            info!("{:?} {:?}", command, ble_initialized);
-                            if !ble_initialized {
-                                Self::setup_bluetooth(events_channel.clone()).await;
-                                ble_initialized = true;
-                            }
+                            tx.send(command).unwrap();
                         }
                         Commands::StartDeepSleep => {
+                            tx.send(command).unwrap();
                             break;
                         }
                         _ => {}
@@ -44,21 +43,28 @@ impl BleModule {
             }
         }
 
-        if ble_initialized {
-            BLEDevice::deinit();
-        }
+        ble_task.await.unwrap();
 
         info!("done.");
     }
 
-    async fn setup_bluetooth(events_channel: Sender<Events>) {
+    fn setup_bluetooth(
+        events_channel: Sender<Events>,
+        mut rx: std::sync::mpsc::Receiver<Commands>,
+    ) {
+        let command = rx.recv().unwrap();
+
+        if matches!(command, Commands::StartDeepSleep) {
+            return;
+        }
+
         info!("initializing bluetooth...");
 
         let ble_device = BLEDevice::take();
 
         let server = ble_device.get_server();
 
-        let events= events_channel.clone();
+        let events = events_channel.clone();
         server.on_connect(move |server, desc| {
             info!("client connected");
             events.send(Events::BluetoothConnected).unwrap();
@@ -66,27 +72,23 @@ impl BleModule {
 
         let service = server.create_service(Self::SERVICE_GUID);
 
-        // A static characteristic.
-        let static_characteristic = service.lock().create_characteristic(
-            Self::STATIC_CHARACTERISTIC,
-            NimbleProperties::READ,
-        );
+        let static_characteristic = service
+            .lock()
+            .create_characteristic(Self::STATIC_CHARACTERISTIC, NimbleProperties::READ);
         static_characteristic
             .lock()
             .set_value("Hello, world!".as_bytes());
 
-        // A characteristic that notifies every second.
         let notifying_characteristic = service.lock().create_characteristic(
             Self::NOTIFYING_CHARACTERISTIC,
             NimbleProperties::READ | NimbleProperties::NOTIFY,
         );
         notifying_characteristic.lock().set_value(b"Initial value.");
 
-        let rw_characteristic = service
-            .lock()
-            .create_characteristic(
-                Self::RW_CHARACTERISTIC,
-                NimbleProperties::READ | NimbleProperties::WRITE);
+        let rw_characteristic = service.lock().create_characteristic(
+            Self::RW_CHARACTERISTIC,
+            NimbleProperties::READ | NimbleProperties::WRITE,
+        );
 
         rw_characteristic
             .lock()
@@ -95,22 +97,26 @@ impl BleModule {
                 info!("Read from writable characteristic.");
             })
             .on_write(move |args| {
-                events_channel.send(Events::IncomingData(Vec::from(args.recv_data))).unwrap();
+                events_channel
+                    .send(Events::IncomingData(Vec::from(args.recv_data)))
+                    .unwrap();
             });
 
-        let advertising = ble_device
-            .get_advertising();
+        let advertising = ble_device.get_advertising();
 
         if !advertising.is_advertising() {
-            advertising
+            if let Err(error) = advertising
                 .name(Self::DEVICE_NAME)
                 .add_service_uuid(Self::SERVICE_GUID)
                 .add_tx_power()
-                .start()
-                .unwrap();
+                .start_with_duration(10_000)
+            {
+                error!("can't start ble advertising, error {:?}", error);
+                return;
+            }
         }
 
-        info!("advertising...")
+        info!("advertising...");
 
         /*
         for i in 0..60 {
@@ -118,5 +124,11 @@ impl BleModule {
             sleep(Duration::from_millis(1000)).await;
         }
         */
+
+        let command = rx.recv().unwrap();
+
+        if matches!(command, Commands::StartDeepSleep) {
+            BLEDevice::deinit();
+        }
     }
 }

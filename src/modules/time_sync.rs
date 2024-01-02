@@ -1,56 +1,46 @@
-use log::{debug, info};
-use time::{Duration, OffsetDateTime, UtcOffset};
-use tokio::sync::broadcast::Sender;
 use crate::peripherals::hal::{Commands, Events};
-use crate::peripherals::nvs_storage::NvsStorage;
-use tokio::sync::{Mutex, watch};
+use crate::persistence::{PersistenceUnit, PersistenceUnitKind};
+use log::{debug, error, info};
+use time::{Duration, OffsetDateTime, UtcOffset};
 use tokio::select;
+use tokio::sync::broadcast::Sender;
+use tokio::sync::watch;
 use tokio::time::MissedTickBehavior;
 
-#[derive(PartialEq, Copy, Clone)]
-pub enum RtcSyncState {
-    Init,
-    InSync,
-    AwaitingTimeNow,
-    AwaitingReferenceTime,
-    Aborted
-}
+pub struct TimeSync {}
 
-pub struct TimeSync {
-}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Default)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Default, Hash)]
 pub struct RtcSyncInfo {
     pub last_sync: i64,
     pub offset: i32,
-    //pub last_sync_utc: OffsetDateTime,
-    pub in_sync: bool
+    pub in_sync: bool,
 }
 
-const NVS_NAMESPACE: &str = "rtc_sync";
-const NVS_FIELD: &str = "rtc_sync_info";
-const SYNC_INTERVAL_DAYS: i8 = 1;
+impl Into<OffsetDateTime> for &RtcSyncInfo {
+    fn into(self) -> OffsetDateTime {
+        let last_sync = OffsetDateTime::from_unix_timestamp(self.last_sync)
+            .unwrap()
+            .replace_offset(UtcOffset::from_whole_seconds(self.offset).unwrap());
+        last_sync
+    }
+}
 
-impl TimeSync
-{
+const SYNC_INTERVAL_MINUTES: i8 = 10;
+
+impl TimeSync {
     pub async fn start(commands: Sender<Commands>, events: Sender<Events>) {
         debug!("time_sync module start...");
 
         let mut recv_cmd = commands.subscribe();
         let mut recv_event = events.subscribe();
 
-        let mut storage = Mutex::new(NvsStorage::create(NVS_NAMESPACE));
-
-        let state: Mutex<RtcSyncState> = Mutex::new(RtcSyncState::Init);
-        let state_timezone = 0;
-
-        //let init_sync_info = RtcSyncInfo::default();
-        //storage.write(NVS_FIELD, &init_sync_info).unwrap();
-
         let cm1 = commands.clone();
         let (tx, rx) = watch::channel(true);
 
         let timer = tokio::spawn(Self::run_timer(rx, cm1));
+
+        let mut now: Option<OffsetDateTime> = None;
+        let mut sync_info: Option<RtcSyncInfo> = None;
 
         loop {
             select! {
@@ -58,7 +48,9 @@ impl TimeSync
                     info!("{:?}", command);
                     match command {
                         Commands::SyncRtc => {
-                            Self::set_state(&state, RtcSyncState::AwaitingTimeNow).await;
+                            commands
+                                .send(Commands::Restore(PersistenceUnitKind::RtcSyncInfo))
+                                .unwrap();
                         }
                         Commands::StartDeepSleep => {
                             tx.send(true).unwrap();
@@ -76,51 +68,61 @@ impl TimeSync
                 Ok(event) = recv_event.recv() => {
                     info!("{:?}", event);
                     match event {
-                        Events::TimeNow(now) => {
-
-                            if Self::get_state(&state).await != RtcSyncState::AwaitingTimeNow {
+                        Events::TimeNow(time) => {
+                            if now.is_some() {
                                 continue;
                             }
 
-                            let mut is_in_sync = false;
+                            now = Some(time);
 
-                            if let Ok(sync_info) = storage
-                                .lock()
-                                .await
-                                .read::<RtcSyncInfo>(NVS_FIELD)
-                            {
-                                info!("{:?}", sync_info);
-                                let RtcSyncInfo {last_sync, offset, in_sync} = sync_info;
-
-                                let last_sync_woffset = OffsetDateTime::from_unix_timestamp(last_sync).unwrap().replace_offset(UtcOffset::from_whole_seconds(offset).unwrap());
-
-                                let diff = now - last_sync_woffset;
-
-                                is_in_sync = in_sync && diff <= Duration::days(SYNC_INTERVAL_DAYS as i64);
-                                info!("{:?} {:?}", diff, is_in_sync);
-                            }
-
-                            is_in_sync = false;
-
-                            if is_in_sync {
-                                Self::set_state(&state, RtcSyncState::InSync).await;
-                            }
-                            else {
+                            if Self::is_sync_required(&now, &sync_info) {
                                 commands.send(Commands::GetReferenceTime).unwrap();
-                                Self::set_state(&state, RtcSyncState::AwaitingReferenceTime).await;
                             }
                         }
                         Events::ReferenceTime(now) => {
                             commands.send(Commands::SetTime(now)).unwrap();
 
-                            let sync_info = RtcSyncInfo {
+                            let rtc_sync_info = RtcSyncInfo {
                                 in_sync: true,
                                 last_sync: now.unix_timestamp(),
                                 offset: now.offset().whole_seconds()
                             };
 
-                            storage.lock().await.write(NVS_FIELD, &sync_info).unwrap();
-                            Self::set_state(&state, RtcSyncState::InSync).await;
+                            let unit = PersistenceUnit::new(PersistenceUnitKind::RtcSyncInfo, &rtc_sync_info);
+                            commands.send(Commands::Persist(unit)).unwrap();
+                        }
+                        Events::Restored(unit) => {
+                            if !matches!(unit.kind, PersistenceUnitKind::RtcSyncInfo) {
+                                continue;
+                            }
+
+                            if let Err(error) = unit.data {
+                                error!("{}", error);
+                                commands.send(Commands::GetReferenceTime).unwrap();
+                                continue;
+                            }
+
+                            let res = unit.deserialize();
+
+                            match res {
+                                Ok(sync_info_restored) => {
+                                    info!("{:?}", sync_info_restored);
+
+                                    sync_info = Some(sync_info_restored);
+
+                                    let utc_offset = sync_info.as_ref().unwrap().offset;
+                                    events.send(Events::Timezone(utc_offset)).unwrap();
+
+                                    if Self::is_sync_required(&now, &sync_info) {
+                                        commands.send(Commands::GetReferenceTime).unwrap();
+                                    }
+                                },
+                                Err(error) => {
+                                    error!("{:?}", error);
+                                    commands.send(Commands::GetReferenceTime).unwrap();
+                                    continue;
+                                }
+                            }
                         }
                         _ => {}
                     }
@@ -133,6 +135,34 @@ impl TimeSync
         info!("done.");
     }
 
+    fn is_sync_required(
+        now_opt: &Option<OffsetDateTime>,
+        sync_info_opt: &Option<RtcSyncInfo>,
+    ) -> bool {
+        if now_opt.is_none() || sync_info_opt.is_none() {
+            return false;
+        }
+
+        let sync_info = sync_info_opt.as_ref().unwrap();
+        let now = now_opt.unwrap();
+        let last_sync: OffsetDateTime = sync_info.into();
+
+        if sync_info.in_sync && Self::is_in_sync(&now, &last_sync) {
+            return false;
+        }
+
+        return true;
+    }
+
+    fn is_in_sync(now: &OffsetDateTime, last_sync: &OffsetDateTime) -> bool {
+        let diff = *now - *last_sync;
+        let is_in_sync = diff <= Duration::minutes(SYNC_INTERVAL_MINUTES as i64);
+
+        info!("{:?} {:?}", diff, is_in_sync);
+
+        is_in_sync
+    }
+
     async fn run_timer(pause_param: watch::Receiver<bool>, commands: Sender<Commands>) {
         let mut pause = pause_param;
 
@@ -142,8 +172,6 @@ impl TimeSync
         info!("before loop");
 
         let mut pause_flag = false;
-
-        let commands_wlock = Mutex::new(commands);
 
         loop {
             select! {
@@ -159,21 +187,12 @@ impl TimeSync
 
                     info!("tick");
 
-                    commands_wlock.lock().await.send(Commands::GetTimeNow).unwrap();
+
+                    commands.send(Commands::GetTimeNow).unwrap();
                 }
             }
         }
 
         info!("out of tick loop");
-    }
-
-    async fn set_state(state: &Mutex<RtcSyncState>, value: RtcSyncState) {
-        let mut lock = state.lock().await;
-        *lock = value;
-    }
-
-    async fn get_state(state: &Mutex<RtcSyncState>) -> RtcSyncState {
-        let val = state.lock().await;
-        return *val;
     }
 }

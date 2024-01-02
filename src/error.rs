@@ -1,8 +1,8 @@
+use esp_idf_hal::i2c::I2cError;
 use std::fmt::{Display, Formatter};
 use std::sync::PoisonError;
-use esp_idf_hal::i2c::I2cError;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Error(pub String);
 
 impl<G> From<PoisonError<G>> for Error {
@@ -20,6 +20,12 @@ impl From<std::io::Error> for Error {
 impl From<I2cError> for Error {
     fn from(error: I2cError) -> Self {
         Error(format!("I2C error: {error}"))
+    }
+}
+
+impl From<&str> for Error {
+    fn from(error: &str) -> Self {
+        Error(String::from(error))
     }
 }
 

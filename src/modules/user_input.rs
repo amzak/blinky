@@ -1,17 +1,13 @@
+use crate::peripherals::hal::{Commands, Events};
 use esp_idf_hal::gpio::{AnyIOPin, Input, PinDriver};
 use esp_idf_sys::EspError;
 use log::info;
 use tokio::sync::broadcast::Sender;
-use tokio::sync::Mutex;
-use crate::peripherals::hal::{Commands, Events};
 use tokio::time::{sleep, Duration};
 
-pub struct UserInput {
-
-}
+pub struct UserInput {}
 
 impl UserInput {
-
     pub async fn start(commands: Sender<Commands>, events: Sender<Events>) {
         let mut recv_cmd = commands.subscribe();
         let mut recv_event = events.subscribe();
@@ -43,17 +39,14 @@ impl UserInput {
         info!("done.");
     }
 
-    async fn wait_for_touch(mut pin: PinDriver<'static, AnyIOPin, Input>, events: Sender<Events>) -> Result<(), EspError> {
-        let events_wlock = Mutex::new(events);
-
+    async fn wait_for_touch(
+        mut pin: PinDriver<'static, AnyIOPin, Input>,
+        events: Sender<Events>,
+    ) -> Result<(), EspError> {
         loop {
-            sleep(Duration::from_millis(5)).await;
-            let level = pin.get_level();
-            info!("waiting for input... {:?}", level);
+            sleep(Duration::from_millis(100)).await;
             pin.wait_for_falling_edge().await.unwrap();
-            let level = pin.get_level();
-            info!("pin irq level {:?}", level);
-            events_wlock.lock().await.send(Events::TouchOrMove).unwrap();
+            events.send(Events::TouchOrMove).unwrap();
         }
     }
 

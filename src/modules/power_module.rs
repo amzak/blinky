@@ -1,26 +1,29 @@
-use std::sync::Arc;
+use crate::peripherals::adc::AdcDevice;
+use crate::peripherals::backlight::Backlight;
+use crate::peripherals::hal::{Commands, Events, PinConfig, WakeupCause};
 use esp_idf_hal::adc::ADC1;
 use esp_idf_hal::gpio::{AnyIOPin, Gpio36, Level, PinDriver, Pull};
-use esp_idf_sys::{esp_sleep_ext1_wakeup_mode_t_ESP_EXT1_WAKEUP_ALL_LOW, esp_sleep_source_t_ESP_SLEEP_WAKEUP_ALL, esp_sleep_source_t_ESP_SLEEP_WAKEUP_EXT0, esp_sleep_source_t_ESP_SLEEP_WAKEUP_EXT1, esp_sleep_source_t_ESP_SLEEP_WAKEUP_TIMER, esp_sleep_source_t_ESP_SLEEP_WAKEUP_UNDEFINED, esp_sleep_wakeup_cause_t, gpio_int_type_t_GPIO_INTR_LOW_LEVEL, gpio_num_t_GPIO_NUM_34};
-use tokio::sync::broadcast::Sender;
-use crate::peripherals::hal::{Commands, Events, PinConfig, WakeupCause};
+use esp_idf_sys::{
+    esp_sleep_ext1_wakeup_mode_t_ESP_EXT1_WAKEUP_ALL_LOW, esp_sleep_source_t_ESP_SLEEP_WAKEUP_ALL,
+    esp_sleep_source_t_ESP_SLEEP_WAKEUP_EXT0, esp_sleep_source_t_ESP_SLEEP_WAKEUP_EXT1,
+    esp_sleep_source_t_ESP_SLEEP_WAKEUP_TIMER, esp_sleep_source_t_ESP_SLEEP_WAKEUP_UNDEFINED,
+    esp_sleep_wakeup_cause_t, gpio_int_type_t_GPIO_INTR_LOW_LEVEL, gpio_num_t_GPIO_NUM_34,
+};
 use log::info;
+use std::sync::Arc;
 use tokio::select;
+use tokio::sync::broadcast::Sender;
 use tokio::sync::Notify;
-use crate::peripherals::backlight::Backlight;
 use tokio::time::Duration;
-use crate::peripherals::adc::AdcDevice;
 
-pub struct PowerModule {
-
-}
+pub struct PowerModule {}
 
 #[repr(u8)]
 pub enum PowerMode {
     On,
     ScreenOff,
     LightSleep,
-    DeepSleep
+    DeepSleep,
 }
 
 impl PowerModule {
@@ -28,7 +31,13 @@ impl PowerModule {
     const TILL_DEEP_SLEEP_SEC: u64 = 30;
     const TILL_LIGHT_SLEEP_SEC: u64 = 5;
 
-    pub async fn start(adc: ADC1, gpio36: Gpio36, config: PinConfig, commands: Sender<Commands>, events: Sender<Events>) {
+    pub async fn start(
+        adc: ADC1,
+        gpio36: Gpio36,
+        config: PinConfig,
+        commands: Sender<Commands>,
+        events: Sender<Events>,
+    ) {
         let mut recv_cmd = commands.subscribe();
         let mut recv_event = events.subscribe();
 
@@ -40,7 +49,10 @@ impl PowerModule {
         let mut adc_device = AdcDevice::new(adc, gpio36);
         let adc_value = adc_device.read();
         info!("adc {:?}", adc_value);
-        events.send(Events::BatteryLevel(adc_value)).unwrap();
+
+        events
+            .send(Events::BatteryLevel(Self::convert_to_percent(adc_value)))
+            .unwrap();
 
         let is_charging = Self::is_charging();
         events.send(Events::Charging(is_charging)).unwrap();
@@ -142,7 +154,7 @@ impl PowerModule {
             esp_sleep_source_t_ESP_SLEEP_WAKEUP_EXT1 => WakeupCause::Ext1,
             esp_sleep_source_t_ESP_SLEEP_WAKEUP_UNDEFINED => WakeupCause::Undef,
             esp_sleep_source_t_ESP_SLEEP_WAKEUP_TIMER => WakeupCause::Timer,
-            esp_sleep_source_t_ESP_SLEEP_WAKEUP_ULP => WakeupCause::Ulp
+            esp_sleep_source_t_ESP_SLEEP_WAKEUP_ULP => WakeupCause::Ulp,
         };
 
         return cause;
@@ -166,9 +178,10 @@ impl PowerModule {
         unsafe {
             let result = esp_idf_sys::esp_sleep_enable_ext0_wakeup(gpio_num_t_GPIO_NUM_34, 0); // key 2
 
-            let result_ext1 = esp_idf_sys::esp_sleep_enable_ext1_wakeup( // accel, touchpad
-                                                                         1 << 32,
-                                                                         esp_sleep_ext1_wakeup_mode_t_ESP_EXT1_WAKEUP_ALL_LOW,
+            let result_ext1 = esp_idf_sys::esp_sleep_enable_ext1_wakeup(
+                // accel, touchpad
+                1 << 32,
+                esp_sleep_ext1_wakeup_mode_t_ESP_EXT1_WAKEUP_ALL_LOW,
             );
         }
     }
@@ -209,5 +222,19 @@ impl PowerModule {
         let mut pin_driver = PinDriver::input(pin).unwrap();
         pin_driver.set_pull(Pull::Up).unwrap();
         pin_driver.get_level() == Level::Low
+    }
+
+    const adc_min: u16 = 1600;
+    const adc_max: u16 = 2050;
+
+    fn convert_to_percent(adc_level: u16) -> u16 {
+        let percent: u32 =
+            100 * ((adc_level - Self::adc_min) as u32) / (Self::adc_max - Self::adc_min) as u32;
+
+        if percent > 100 {
+            return 100;
+        }
+
+        return percent as u16;
     }
 }

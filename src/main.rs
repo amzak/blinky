@@ -1,95 +1,32 @@
 #![feature(slice_as_chunks)]
 #![feature(vec_push_within_capacity)]
+#![feature(async_fn_in_trait)]
 
-use esp_idf_hal::{peripherals::Peripherals};
-
-use time::OffsetDateTime;
-
-use serde::{Deserialize};
-use tokio::join;
-
-use tokio::sync::broadcast;
-
-use esp_idf_svc::log::{EspLogger, set_target_level};
+use esp_idf_hal::peripherals::Peripherals;
+use esp_idf_svc::log::{set_target_level, EspLogger};
 use log::*;
-use crate::modules::accel_module::AccelerometerModule;
-use crate::modules::ble_module::BleModule;
-use crate::modules::power_module::PowerModule;
-use crate::modules::reference_time::ReferenceTime;
-
-use crate::modules::renderer::Renderer;
-use crate::modules::rtc_module::RtcModule;
-
-use crate::modules::time_sync::{TimeSync};
-use crate::modules::touch_module::TouchModule;
-use crate::modules::user_input::UserInput;
-
-mod peripherals {
-    pub mod bma423ex;
-    pub mod backlight;
-    pub mod hal;
-    pub mod display;
-    pub mod accelerometer;
-    pub mod i2c_management;
-    pub mod i2c_proxy_async;
-    pub mod touchpad;
-    pub mod rtc;
-    pub mod wifi;
-    pub mod nvs_storage;
-    pub mod adc;
-}
-
-mod modules {
-    pub mod time_sync;
-    pub mod reference_time;
-    pub mod reference_data;
-    pub mod renderer;
-    pub mod power_module;
-    pub mod user_input;
-    pub mod accel_module;
-    pub mod touch_module;
-    pub mod rtc_module;
-    pub mod ble_module;
-}
-
+use std::thread;
+use tokio::join;
+use tokio::sync::broadcast::{self};
 
 mod error;
+mod modules;
+mod peripherals;
+mod persistence;
 
-use crate::peripherals::hal::{HAL, Commands, HalConfig, Events, PinConfig};
-use crate::peripherals::wifi::WifiConfig;
+use peripherals::hal::{Commands, Events, HalConfig, PinConfig, HAL};
 
-const SSID: &str = "HOTBOX-B212";
-const PASS: &str = "0534337688";
-const LAST_SYNC: &str = "last_sync";
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct LastSyncInfo {
-    pub last_sync: OffsetDateTime,
-}
-
-#[derive(Debug, Deserialize, PartialEq)]
-#[repr(u8)]
-pub enum RideType {
-    train,
-    bus
-}
-
-#[derive(Debug, Deserialize, PartialEq)]
-pub struct Ride {
-    pub departure_time: i64,
-    pub arrival_time: i64,
-
-    pub ride_type: RideType,
-    pub delay_minutes: i32,
-    pub route: String,
-    pub from: String,
-    pub to: String
-}
-
-//#[link_section = ".rtc.data"]
-//static mut CurrentCoords: GpsCoordinates = GpsCoordinates {lat: 0.0, lon: 0.0};
-
-//esp_app_desc!();
+use modules::accel_module::AccelerometerModule;
+use modules::ble_module::BleModule;
+use modules::calendar_module::CalendarModule;
+use modules::persister_module::PersisterModule;
+use modules::power_module::PowerModule;
+use modules::reference_time::ReferenceTime;
+use modules::renderer::Renderer;
+use modules::rtc_module::RtcModule;
+use modules::time_sync::TimeSync;
+use modules::touch_module::TouchModule;
+use modules::user_input::UserInput;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // It is necessary to call this function once. Otherwise some patches to the runtime
@@ -100,27 +37,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     set_max_level(LevelFilter::Info);
     set_target_level("spi_master", LevelFilter::Error).unwrap();
 
-    /*
-    unsafe {
-        let is_init = esp_idf_sys::esp_spiram_is_initialized();
-        let size = esp_idf_sys::esp_spiram_get_size();
-        let chip_size = esp_idf_sys::esp_spiram_get_chip_size();
-
-        info!("{} {} {}", is_init, size, chip_size);
-    }
-    */
-
     let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_time()
-        .worker_threads(4)
+        .worker_threads(2)
+        .on_thread_start(|| {
+            let core = esp_idf_hal::cpu::core();
+            info!(
+                "thread started {:?} core {:?}",
+                thread::current().id(),
+                core
+            );
+        })
         .thread_stack_size(30 * 1024)
         .build()?;
 
-    //let rt = tokio::runtime::Runtime::new()?;
-
-    rt.block_on(async {
-        main_async().await
-    })?;
+    rt.block_on(async { main_async().await })?;
 
     PowerModule::goto_deep_sleep();
 
@@ -136,17 +67,12 @@ async fn main_async() -> Result<(), Box<dyn std::error::Error>> {
         backlight: 21,
         touch_interrupt_pin: 12,
         touch_reset_pin: 33,
-        wifi_config: WifiConfig {
-            is_enabled: false,
-            ssid: String::from(SSID),
-            pass: String::from(PASS)
-        }
     };
 
     let (commands_sender, _) = broadcast::channel::<Commands>(32);
     let (events_sender, _) = broadcast::channel::<Events>(32);
 
-    let mut hal= HAL::new(hal_conf, peripherals.i2c0);
+    let mut hal = HAL::new(hal_conf, peripherals.i2c0);
 
     let i2c_proxy_async = hal.get_i2c_proxy_async().clone();
 
@@ -181,19 +107,24 @@ async fn main_async() -> Result<(), Box<dyn std::error::Error>> {
     let commands_channel = commands_sender.clone();
     let events_channel = events_sender.clone();
 
-    let pin_conf = PinConfig {
-        backlight: 21
-    };
+    let pin_conf = PinConfig { backlight: 21 };
 
     let power_task = tokio::spawn(async move {
-        PowerModule::start( peripherals.adc1, peripherals.pins.gpio36, pin_conf, commands_channel, events_channel).await;
+        PowerModule::start(
+            peripherals.adc1,
+            peripherals.pins.gpio36,
+            pin_conf,
+            commands_channel,
+            events_channel,
+        )
+        .await;
     });
 
     let commands_channel = commands_sender.clone();
     let events_channel = events_sender.clone();
 
     let user_input_task = tokio::spawn(async move {
-        UserInput::start( commands_channel, events_channel).await;
+        UserInput::start(commands_channel, events_channel).await;
     });
 
     let commands_channel = commands_sender.clone();
@@ -212,7 +143,13 @@ async fn main_async() -> Result<(), Box<dyn std::error::Error>> {
     let accel_proxy_ex = hal.get_i2c_proxy_async();
 
     let accel_task = tokio::spawn(async move {
-        AccelerometerModule::start( accel_proxy, accel_proxy_ex, commands_channel, events_channel).await;
+        AccelerometerModule::start(
+            accel_proxy,
+            accel_proxy_ex,
+            commands_channel,
+            events_channel,
+        )
+        .await;
     });
 
     let commands_channel = commands_sender.clone();
@@ -223,13 +160,26 @@ async fn main_async() -> Result<(), Box<dyn std::error::Error>> {
     });
 
     let commands_channel = commands_sender.clone();
+    let events_channel = events_sender.clone();
+
+    let calendar_task = tokio::spawn(async move {
+        CalendarModule::start(commands_channel, events_channel).await;
+    });
+
+    let commands_channel = commands_sender.clone();
+    let events_channel = events_sender.clone();
+
+    let persister_task = tokio::spawn(async move {
+        PersisterModule::start(commands_channel, events_channel).await;
+    });
+
+    let commands_channel = commands_sender.clone();
 
     let startup_sequence = tokio::spawn(async move {
         commands_channel.send(Commands::SyncRtc).unwrap();
+        commands_channel.send(Commands::SyncCalendar).unwrap();
         commands_channel.send(Commands::GetTemperature).unwrap();
     });
-
-    info!("before join");
 
     join!(
         rtc_task,
@@ -241,7 +191,9 @@ async fn main_async() -> Result<(), Box<dyn std::error::Error>> {
         accel_task,
         reference_time_task,
         power_task,
-        startup_sequence
+        persister_task,
+        calendar_task,
+        startup_sequence,
     );
 
     info!("done.");

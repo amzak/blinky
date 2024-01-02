@@ -1,24 +1,23 @@
-use std::sync::Arc;
+use crate::peripherals::accelerometer::Accelerometer;
+use crate::peripherals::hal::{Commands, Events};
+use crate::peripherals::i2c_proxy_async::I2cProxyAsync;
 use esp_idf_hal::i2c::I2cDriver;
 use log::{error, info};
+use std::sync::Arc;
 use tokio::sync::broadcast::{Receiver, Sender};
 use tokio::sync::Notify;
-use crate::peripherals::accelerometer::{Accelerometer, Thermometer};
-use crate::peripherals::hal::{Commands, Events, WakeupCause};
-use crate::peripherals::i2c_proxy_async::I2cProxyAsync;
 
 use tokio::time::{sleep, Duration};
 
-pub struct AccelerometerModule {
-
-}
+pub struct AccelerometerModule {}
 
 impl AccelerometerModule {
     pub async fn start(
         proxy: I2cProxyAsync<I2cDriver<'static>>,
         proxy_ex: I2cProxyAsync<I2cDriver<'static>>,
         commands: Sender<Commands>,
-        events: Sender<Events>) {
+        events: Sender<Events>,
+    ) {
         let recv_cmd = commands.subscribe();
 
         let mut accel_init_res = Accelerometer::create(proxy, proxy_ex).await;
@@ -35,7 +34,11 @@ impl AccelerometerModule {
 
         info!("done.")
     }
-    async fn proceed(mut accel: Accelerometer<'static>, mut commands: Receiver<Commands>, events: Sender<Events>) {
+    async fn proceed(
+        accel: Accelerometer<'static>,
+        mut commands: Receiver<Commands>,
+        events: Sender<Events>,
+    ) {
         let mut recv_event = events.subscribe();
 
         let start_read = Arc::new(Notify::new());
@@ -88,4 +91,3 @@ impl AccelerometerModule {
         }
     }
 }
-
