@@ -1,4 +1,8 @@
-use std::{collections::hash_map::DefaultHasher, hash::Hash, sync::Arc};
+use std::{
+    collections::hash_map::{self},
+    hash::{BuildHasher, Hash, Hasher},
+    sync::Arc,
+};
 use tokio::sync::broadcast::Sender;
 
 use crate::{
@@ -43,11 +47,14 @@ impl PersisterModule {
                                     data: bytes
                                 };
 
-                                let mut hasher = DefaultHasher::new();
-                                let hash_of_existing = existing.hash(&mut hasher);
-                                let hash_of_new = dto.hash(&mut hasher);
+                                let hasher_state = hash_map::RandomState::new();
+                                let mut hasher_of_existing = hasher_state.build_hasher();
+                                let mut hasher_of_new = hasher_state.build_hasher();
 
-                                if hash_of_existing == hash_of_new {
+                                existing.hash(&mut hasher_of_existing);
+                                dto.hash(&mut hasher_of_new);
+
+                                if hasher_of_existing.finish() == hasher_of_new.finish() {
                                     info!("persisting of {:?} skipped, same hash", kind);
 
                                     continue;
