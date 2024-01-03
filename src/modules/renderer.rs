@@ -1,4 +1,4 @@
-use crate::peripherals::display::{ClockDisplay, FrameBuffer};
+use crate::peripherals::display::{ClockDisplay, ClockDisplayInterface, FrameBuffer};
 use crate::peripherals::hal::{Commands, Events};
 use time::{Duration, OffsetDateTime, Time};
 use tokio::sync::broadcast::Sender;
@@ -40,7 +40,10 @@ pub struct ViewModel {
 }
 
 impl Renderer {
-    pub async fn start(commands: Sender<Commands>, events: Sender<Events>) {
+    pub async fn start<TDisplay: ClockDisplayInterface>(
+        commands: Sender<Commands>,
+        events: Sender<Events>,
+    ) {
         let mut recv_cmd = commands.subscribe();
         let mut recv_event = events.subscribe();
 
@@ -49,7 +52,7 @@ impl Renderer {
         let (tx, rx) = channel::<Events>();
 
         let render_loop_task = tokio::task::spawn_blocking(move || {
-            Self::render_loop(rx);
+            Self::render_loop::<TDisplay>(rx);
         });
 
         loop {
@@ -202,8 +205,8 @@ impl Renderer {
         Graphics::icon(frame, Point::new(120 - 18 / 2, 10), &icon);
     }
 
-    fn render_loop(mut rx: std::sync::mpsc::Receiver<Events>) {
-        let mut display = ClockDisplay::create();
+    fn render_loop<TDisplay: ClockDisplayInterface>(mut rx: std::sync::mpsc::Receiver<Events>) {
+        let mut display = TDisplay::create();
 
         let mut state: ViewModel = ViewModel {
             battery_level: None,
@@ -225,7 +228,11 @@ impl Renderer {
         }
     }
 
-    fn render_change(display: &mut ClockDisplay, event: Events, view_model: &mut ViewModel) {
+    fn render_change(
+        display: &mut impl ClockDisplayInterface,
+        event: Events,
+        view_model: &mut ViewModel,
+    ) {
         info!("{:?}", event);
         match event {
             Events::TimeNow(now) => {
@@ -256,7 +263,7 @@ impl Renderer {
         Self::render(display, view_model);
     }
 
-    fn render(display: &mut ClockDisplay, vm: &mut ViewModel) {
+    fn render(display: &mut impl ClockDisplayInterface, vm: &mut ViewModel) {
         display.render(|frame| {
             let style = PrimitiveStyle::with_stroke(Rgb565::WHITE, 1);
             let top_left = Point::new(3, 3);

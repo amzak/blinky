@@ -31,8 +31,13 @@ impl<'d> ClockDisplay<'d> {
     pub const FRAME_BUFFER_SIZE: usize = Self::FRAME_BUFFER_WIDTH * Self::FRAME_BUFFER_HEIGHT;
 }
 
-impl<'d> ClockDisplay<'d> {
-    pub fn create() -> Self {
+pub trait ClockDisplayInterface {
+    fn create() -> Self;
+    fn render(&mut self, func: impl Fn(&mut FrameBuffer));
+}
+
+impl<'d> ClockDisplayInterface for ClockDisplay<'d> {
+    fn create() -> Self {
         let mut delay = Ets;
         let spi = unsafe { SPI2::new() };
         let cs = unsafe { Gpio15::new() };
@@ -70,17 +75,7 @@ impl<'d> ClockDisplay<'d> {
         res
     }
 
-    fn prepare_frame_buf() -> Box<[Rgb565]> {
-        let mut v = Vec::<Rgb565>::with_capacity(ClockDisplay::FRAME_BUFFER_SIZE);
-        for _ in 0..v.capacity() {
-            v.push_within_capacity(Rgb565::BLACK).unwrap();
-        }
-
-        let buffer = v.into_boxed_slice();
-        buffer
-    }
-
-    pub fn render(&mut self, func: impl Fn(&mut FrameBuffer)) {
+    fn render(&mut self, func: impl Fn(&mut FrameBuffer)) {
         let data = self.buffer.as_mut();
 
         let buf: &mut [Rgb565; ClockDisplay::FRAME_BUFFER_SIZE] = data.try_into().unwrap();
@@ -98,6 +93,18 @@ impl<'d> ClockDisplay<'d> {
         let t = data.into_iter().map(|x| *x);
 
         self.display.fill_contiguous(&rect, t).unwrap();
+    }
+}
+
+impl<'d> ClockDisplay<'d> {
+    fn prepare_frame_buf() -> Box<[Rgb565]> {
+        let mut v = Vec::<Rgb565>::with_capacity(ClockDisplay::FRAME_BUFFER_SIZE);
+        for _ in 0..v.capacity() {
+            v.push_within_capacity(Rgb565::BLACK).unwrap();
+        }
+
+        let buffer = v.into_boxed_slice();
+        buffer
     }
 }
 

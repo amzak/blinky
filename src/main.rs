@@ -28,6 +28,8 @@ use modules::time_sync::TimeSync;
 use modules::touch_module::TouchModule;
 use modules::user_input::UserInput;
 
+use crate::peripherals::display::ClockDisplay;
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // It is necessary to call this function once. Otherwise some patches to the runtime
     // implemented by esp-idf-sys might not link properly. See https://github.com/esp-rs/esp-idf-template/issues/71
@@ -101,7 +103,7 @@ async fn main_async() -> Result<(), Box<dyn std::error::Error>> {
     let events_channel = events_sender.clone();
 
     let renderer_task = tokio::spawn(async move {
-        Renderer::start(commands_channel, events_channel).await;
+        Renderer::start::<ClockDisplay>(commands_channel, events_channel).await;
     });
 
     let commands_channel = commands_sender.clone();
