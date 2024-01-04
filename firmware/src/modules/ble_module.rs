@@ -108,12 +108,13 @@ impl BleModule {
             if let Err(error) = advertising
                 .name(Self::DEVICE_NAME)
                 .add_service_uuid(Self::SERVICE_GUID)
-                .add_tx_power()
-                .start_with_duration(10_000)
+                .start_with_duration(15_000)
             {
                 error!("can't start ble advertising, error {:?}", error);
                 return;
             }
+        } else {
+            info!("start ble advertising skipped");
         }
 
         info!("advertising...");

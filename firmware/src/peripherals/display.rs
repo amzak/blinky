@@ -26,12 +26,13 @@ pub struct ClockDisplay<'d> {
 }
 
 impl<'d> ClockDisplay<'d> {
-    pub const FRAME_BUFFER_WIDTH: usize = 240;
-    pub const FRAME_BUFFER_HEIGHT: usize = 240;
-    pub const FRAME_BUFFER_SIZE: usize = Self::FRAME_BUFFER_WIDTH * Self::FRAME_BUFFER_HEIGHT;
 }
 
 pub trait ClockDisplayInterface {
+    const FRAME_BUFFER_WIDTH: usize = 240;
+    const FRAME_BUFFER_HEIGHT: usize = 240;
+    const FRAME_BUFFER_SIZE: usize = Self::FRAME_BUFFER_WIDTH * Self::FRAME_BUFFER_HEIGHT;
+
     fn create() -> Self;
     fn render(&mut self, func: impl Fn(&mut FrameBuffer));
 }
@@ -78,12 +79,12 @@ impl<'d> ClockDisplayInterface for ClockDisplay<'d> {
     fn render(&mut self, func: impl Fn(&mut FrameBuffer)) {
         let data = self.buffer.as_mut();
 
-        let buf: &mut [Rgb565; ClockDisplay::FRAME_BUFFER_SIZE] = data.try_into().unwrap();
+        let buf: &mut [Rgb565; ClockDisplayInterface::FRAME_BUFFER_SIZE] = data.try_into().unwrap();
 
         let mut frame: FrameBuffer = FrameBuf::new(
             buf,
-            ClockDisplay::FRAME_BUFFER_WIDTH,
-            ClockDisplay::FRAME_BUFFER_HEIGHT,
+            ClockDisplayInterface::FRAME_BUFFER_WIDTH,
+            ClockDisplayInterface::FRAME_BUFFER_HEIGHT,
         );
 
         func(&mut frame);
@@ -98,7 +99,7 @@ impl<'d> ClockDisplayInterface for ClockDisplay<'d> {
 
 impl<'d> ClockDisplay<'d> {
     fn prepare_frame_buf() -> Box<[Rgb565]> {
-        let mut v = Vec::<Rgb565>::with_capacity(ClockDisplay::FRAME_BUFFER_SIZE);
+        let mut v = Vec::<Rgb565>::with_capacity(ClockDisplayInterface::FRAME_BUFFER_SIZE);
         for _ in 0..v.capacity() {
             v.push_within_capacity(Rgb565::BLACK).unwrap();
         }
@@ -113,7 +114,7 @@ impl Drop for ClockDisplay<'_> {
         self.render(|frame| {
             let style = PrimitiveStyle::with_fill(Rgb565::BLACK);
 
-            primitives::Circle::new(Point::zero(), ClockDisplay::FRAME_BUFFER_WIDTH as u32)
+            primitives::Circle::new(Point::zero(), ClockDisplayInterface::FRAME_BUFFER_WIDTH as u32)
                 .into_styled(style)
                 .draw(frame)
                 .unwrap();

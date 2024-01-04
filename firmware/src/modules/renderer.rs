@@ -121,7 +121,7 @@ impl Renderer {
     }
 
     fn draw_arrow(frame: &mut FrameBuffer, angle: f32, length: f32) {
-        let radius = (ClockDisplay::FRAME_BUFFER_WIDTH / 2) as f32;
+        let radius = (ClockDisplayInterface::FRAME_BUFFER_WIDTH / 2) as f32;
 
         let radius_inner = radius - length;
 
@@ -270,7 +270,7 @@ impl Renderer {
             Graphics::circle(
                 frame,
                 top_left,
-                ClockDisplay::FRAME_BUFFER_WIDTH as u32 - top_left.x as u32 * 2,
+                ClockDisplayInterface::FRAME_BUFFER_WIDTH as u32 - top_left.x as u32 * 2,
                 style,
             );
             Self::render_battery_level(frame, vm);
@@ -321,7 +321,7 @@ impl Renderer {
             let top_left = Point::new(2, 2);
             primitives::Arc::new(
                 top_left,
-                ClockDisplay::FRAME_BUFFER_WIDTH as u32 - top_left.x as u32 * 2,
+                ClockDisplayInterface::FRAME_BUFFER_WIDTH as u32 - top_left.x as u32 * 2,
                 Angle::from_degrees(start_angle + 270.0),
                 Angle::from_degrees(angle_sweep),
             )
