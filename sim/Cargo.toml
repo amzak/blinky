@@ -3,10 +3,17 @@ name = "sim"
 version = "0.1.0"
 edition = "2021"
 
+[profile.dev]
+debug = true # Symbols are nice and they don't increase the size on Flash
+opt-level = "z"
+
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
 embedded-graphics = "0.8.1"
 embedded-graphics-simulator = "0.6.0"
 tokio = { version = "1.34.0", features = ["rt-multi-thread", "sync", "time", "macros"] }
+embedded-graphics-framebuf = "0.5.0"
+time = { version = "0.3.20", features = ["macros", "serde", "formatting", "local-offset"] }
+
 blinky-shared = { path = "../shared" }
