@@ -1,6 +1,5 @@
+use blinky_shared::{commands::Commands, events::Events};
 use tokio::sync::broadcast::Sender;
-
-use crate::peripherals::hal::{Commands, Events};
 
 pub trait Module {
     fn new() -> Self;

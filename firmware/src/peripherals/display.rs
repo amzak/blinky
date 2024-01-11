@@ -1,3 +1,4 @@
+use blinky_shared::display_interface::ClockDisplayInterface;
 use display_interface_spi::SPIInterfaceNoCS;
 use embedded_graphics::pixelcolor::{Rgb565, RgbColor};
 use embedded_graphics::prelude::{DrawTarget, *};
@@ -11,33 +12,30 @@ use esp_idf_hal::spi::{Dma, SpiDeviceDriver, SpiDriver, SpiSingleDeviceDriver, S
 use esp_idf_hal::units::FromValueType;
 use mipidsi::models::GC9A01;
 use mipidsi::{Builder, Display};
+use std::convert::Infallible;
 use std::error::Error;
+use std::fmt::Debug;
 
 pub type EspSpi1InterfaceNoCS<'d> =
     SPIInterfaceNoCS<SpiSingleDeviceDriver<'d>, PinDriver<'d, Gpio19, InputOutput>>;
 pub type DisplaySPI2<'d> =
     Display<EspSpi1InterfaceNoCS<'d>, GC9A01, PinDriver<'d, Gpio27, InputOutput>>;
 
-pub type FrameBuffer<'d> = FrameBuf<Rgb565, &'d mut [Rgb565; 57600]>;
-
-pub struct ClockDisplay<'d> {
-    display: DisplaySPI2<'d>,
+pub struct ClockDisplay<'a> {
+    display: DisplaySPI2<'a>,
     buffer: Box<[Rgb565]>,
 }
 
-impl<'d> ClockDisplay<'d> {
-}
+impl<'a> ClockDisplayInterface for ClockDisplay<'a> {
+    type Error = Infallible;
+    type ColorModel = Rgb565;
+    type FrameBuffer<'b> =
+        FrameBuf<Self::ColorModel, &'b mut [Self::ColorModel; ClockDisplay::FRAME_BUFFER_SIZE]>;
 
-pub trait ClockDisplayInterface {
-    const FRAME_BUFFER_WIDTH: usize = 240;
-    const FRAME_BUFFER_HEIGHT: usize = 240;
-    const FRAME_BUFFER_SIZE: usize = Self::FRAME_BUFFER_WIDTH * Self::FRAME_BUFFER_HEIGHT;
+    const FRAME_BUFFER_SIDE: usize = 240;
 
-    fn create() -> Self;
-    fn render(&mut self, func: impl Fn(&mut FrameBuffer));
-}
+    const FRAME_BUFFER_SIZE: usize = Self::FRAME_BUFFER_SIDE * Self::FRAME_BUFFER_SIDE;
 
-impl<'d> ClockDisplayInterface for ClockDisplay<'d> {
     fn create() -> Self {
         let mut delay = Ets;
         let spi = unsafe { SPI2::new() };
@@ -76,48 +74,60 @@ impl<'d> ClockDisplayInterface for ClockDisplay<'d> {
         res
     }
 
-    fn render(&mut self, func: impl Fn(&mut FrameBuffer)) {
+    fn render<'c, 'd: 'c>(
+        &'d mut self,
+        func: impl FnOnce(Self::FrameBuffer<'c>) -> Self::FrameBuffer<'c>,
+    ) {
         let data = self.buffer.as_mut();
 
-        let buf: &mut [Rgb565; ClockDisplayInterface::FRAME_BUFFER_SIZE] = data.try_into().unwrap();
+        let buf: &'c mut [Self::ColorModel; ClockDisplay::FRAME_BUFFER_SIZE] =
+            data.try_into().unwrap();
 
-        let mut frame: FrameBuffer = FrameBuf::new(
+        let mut frame = FrameBuf::new(
             buf,
-            ClockDisplayInterface::FRAME_BUFFER_WIDTH,
-            ClockDisplayInterface::FRAME_BUFFER_HEIGHT,
+            ClockDisplay::FRAME_BUFFER_SIDE,
+            ClockDisplay::FRAME_BUFFER_SIDE,
         );
 
-        func(&mut frame);
+        let frame_size = frame.size();
+        frame = func(frame);
 
-        let rect = Rectangle::new(Point::zero(), frame.size());
+        let data = frame.data;
+        let t = data.iter().map(|x| *x);
 
-        let t = data.into_iter().map(|x| *x);
+        let rect = Rectangle::new(Point::zero(), frame_size);
 
         self.display.fill_contiguous(&rect, t).unwrap();
     }
 }
 
-impl<'d> ClockDisplay<'d> {
-    fn prepare_frame_buf() -> Box<[Rgb565]> {
-        let mut v = Vec::<Rgb565>::with_capacity(ClockDisplayInterface::FRAME_BUFFER_SIZE);
+impl<'a> ClockDisplay<'a> {
+    fn prepare_frame_buf<TColor: RgbColor + Debug>() -> Box<[TColor]> {
+        let mut v = Vec::<TColor>::with_capacity(ClockDisplay::FRAME_BUFFER_SIZE);
         for _ in 0..v.capacity() {
-            v.push_within_capacity(Rgb565::BLACK).unwrap();
+            v.push_within_capacity(TColor::BLACK).unwrap();
         }
 
         let buffer = v.into_boxed_slice();
         buffer
     }
+
+    fn get_frame_buffer_size() -> usize {
+        Self::FRAME_BUFFER_SIZE
+    }
 }
 
 impl Drop for ClockDisplay<'_> {
     fn drop(&mut self) {
-        self.render(|frame| {
-            let style = PrimitiveStyle::with_fill(Rgb565::BLACK);
+        self.render(|mut frame| {
+            let style = PrimitiveStyle::with_fill(RgbColor::BLACK);
 
-            primitives::Circle::new(Point::zero(), ClockDisplayInterface::FRAME_BUFFER_WIDTH as u32)
+            primitives::Circle::new(Point::zero(), Self::FRAME_BUFFER_SIDE as u32)
                 .into_styled(style)
-                .draw(frame)
+                .draw(&mut frame)
                 .unwrap();
+
+            frame
         });
     }
 }

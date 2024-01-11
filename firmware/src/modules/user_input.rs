@@ -1,9 +1,11 @@
-use crate::peripherals::hal::{Commands, Events};
 use esp_idf_hal::gpio::{AnyIOPin, Input, PinDriver};
 use esp_idf_sys::EspError;
 use log::info;
 use tokio::sync::broadcast::Sender;
 use tokio::time::{sleep, Duration};
+
+use blinky_shared::commands::Commands;
+use blinky_shared::events::Events;
 
 pub struct UserInput {}
 

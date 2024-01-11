@@ -1,10 +1,10 @@
+use blinky_shared::error::Error;
 use embedded_hal_compat::{Reverse, ReverseCompat};
 use esp_idf_hal::i2c::{I2cDriver, I2cError};
 use pcf8563::Error::I2C;
 use pcf8563::{DateTime, PCF8563};
 use time::{Date, Month, PrimitiveDateTime};
 
-use crate::error::Error;
 use crate::peripherals::i2c_proxy_async::I2cProxyAsync;
 
 pub type RtcDevice<'a> = PCF8563<Reverse<I2cProxyAsync<I2cDriver<'a>>>>;
@@ -57,7 +57,7 @@ impl<'a> Rtc<'a> {
         let result = self.rtc.set_datetime(&dt);
 
         return result.map_err(|err: pcf8563::Error<I2cError>| match err {
-            I2C(i2c_err) => Error::from(i2c_err),
+            I2C(i2c_err) => Error::from(i2c_err.to_string().as_str()),
             pcf8563::Error::InvalidInputData => Error::from("invalid input data"),
         });
     }

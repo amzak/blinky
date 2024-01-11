@@ -1,6 +1,7 @@
-use time::OffsetDateTime;
-use crate::domain::{CalendarEvent, ReferenceData, TouchPosition, WakeupCause};
+use crate::calendar::CalendarEvent;
+use crate::domain::{ReferenceData, TouchPosition, WakeupCause};
 use crate::persistence::PersistenceUnit;
+use time::OffsetDateTime;
 
 #[derive(Clone, Debug)]
 pub enum Events {

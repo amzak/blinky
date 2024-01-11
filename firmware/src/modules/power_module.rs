@@ -1,6 +1,7 @@
 use crate::peripherals::adc::AdcDevice;
 use crate::peripherals::backlight::Backlight;
-use crate::peripherals::hal::{Commands, Events, PinConfig, WakeupCause};
+use crate::peripherals::hal::PinConfig;
+use blinky_shared::domain::WakeupCause;
 use esp_idf_hal::adc::ADC1;
 use esp_idf_hal::gpio::{AnyIOPin, Gpio36, Level, PinDriver, Pull};
 use esp_idf_sys::{
@@ -15,6 +16,9 @@ use tokio::select;
 use tokio::sync::broadcast::Sender;
 use tokio::sync::Notify;
 use tokio::time::Duration;
+
+use blinky_shared::commands::Commands;
+use blinky_shared::events::Events;
 
 pub struct PowerModule {}
 

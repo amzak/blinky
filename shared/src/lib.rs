@@ -1,9 +1,11 @@
+pub mod calendar;
 pub mod commands;
+pub mod display_interface;
 pub mod domain;
-pub mod events;
-pub mod persistence;
 pub mod error;
+pub mod events;
 pub mod modules;
+pub mod persistence;
 
 pub fn add(left: usize, right: usize) -> usize {
     left + right

@@ -1,11 +1,13 @@
-use crate::peripherals::hal::{Commands, Events};
-use crate::persistence::{PersistenceUnit, PersistenceUnitKind};
+use blinky_shared::persistence::{PersistenceUnit, PersistenceUnitKind};
 use log::{debug, error, info};
 use time::{Duration, OffsetDateTime, UtcOffset};
 use tokio::select;
 use tokio::sync::broadcast::Sender;
 use tokio::sync::watch;
 use tokio::time::MissedTickBehavior;
+
+use blinky_shared::commands::Commands;
+use blinky_shared::events::Events;
 
 pub struct TimeSync {}
 

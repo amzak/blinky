@@ -57,6 +57,7 @@ embedded-graphics-framebuf = "0.5.0"
 embedded-icon = { version = "0.0.1", features = ["18px"] }
 async-trait = "0.1.75"
 strum_macros = "0.25.3"
+blinky-shared = { path = "../shared" }
 
 [build-dependencies]
 embuild = { version = "0.31.4", features = ["espidf"] }

@@ -1,9 +1,11 @@
-use crate::peripherals::hal::{Commands, Events};
 use esp32_nimble::utilities::BleUuid;
 use esp32_nimble::{uuid128, BLEDevice, NimbleProperties};
 use log::{error, info};
 use std::sync::mpsc::channel;
 use tokio::sync::broadcast::Sender;
+
+use blinky_shared::commands::Commands;
+use blinky_shared::events::Events;
 
 pub struct BleModule {}
 

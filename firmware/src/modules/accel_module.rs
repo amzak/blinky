@@ -1,5 +1,4 @@
 use crate::peripherals::accelerometer::Accelerometer;
-use crate::peripherals::hal::{Commands, Events};
 use crate::peripherals::i2c_proxy_async::I2cProxyAsync;
 use esp_idf_hal::i2c::I2cDriver;
 use log::{error, info};
@@ -8,6 +7,9 @@ use tokio::sync::broadcast::{Receiver, Sender};
 use tokio::sync::Notify;
 
 use tokio::time::{sleep, Duration};
+
+use blinky_shared::commands::Commands;
+use blinky_shared::events::Events;
 
 pub struct AccelerometerModule {}
 

@@ -1,7 +1,11 @@
 #![feature(slice_as_chunks)]
 #![feature(vec_push_within_capacity)]
 #![feature(async_fn_in_trait)]
+#![feature(associated_type_bounds)]
 
+use blinky_shared::commands::Commands;
+use blinky_shared::events::Events;
+use blinky_shared::modules::renderer::Renderer;
 use esp_idf_hal::peripherals::Peripherals;
 use esp_idf_svc::log::{set_target_level, EspLogger};
 use log::*;
@@ -9,12 +13,12 @@ use std::thread;
 use tokio::join;
 use tokio::sync::broadcast::{self};
 
-mod error;
+extern crate blinky_shared;
+
 mod modules;
 mod peripherals;
-mod persistence;
 
-use peripherals::hal::{Commands, Events, HalConfig, PinConfig, HAL};
+use peripherals::hal::{HalConfig, PinConfig, HAL};
 
 use modules::accel_module::AccelerometerModule;
 use modules::ble_module::BleModule;
@@ -22,7 +26,6 @@ use modules::calendar_module::CalendarModule;
 use modules::persister_module::PersisterModule;
 use modules::power_module::PowerModule;
 use modules::reference_time::ReferenceTime;
-use modules::renderer::Renderer;
 use modules::rtc_module::RtcModule;
 use modules::time_sync::TimeSync;
 use modules::touch_module::TouchModule;
@@ -103,7 +106,7 @@ async fn main_async() -> Result<(), Box<dyn std::error::Error>> {
     let events_channel = events_sender.clone();
 
     let renderer_task = tokio::spawn(async move {
-        Renderer::start::<ClockDisplay>(commands_channel, events_channel).await;
+        Renderer::<ClockDisplay>::start(commands_channel, events_channel).await;
     });
 
     let commands_channel = commands_sender.clone();

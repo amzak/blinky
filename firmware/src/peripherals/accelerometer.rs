@@ -1,25 +1,28 @@
+use crate::peripherals::bma423ex::{AxesConfig, Bma423Ex, InterruptIOCtlFlags};
+use crate::peripherals::i2c_proxy_async::I2cProxyAsync;
+use blinky_shared::error::Error;
 use bma423::{Bma423, FeatureInterruptStatus};
 use embedded_hal_compat::{Reverse, ReverseCompat};
 use esp_idf_hal::delay::Ets;
 use esp_idf_hal::i2c::I2cDriver;
-use log::{debug, trace, info};
-use crate::peripherals::bma423ex::{AxesConfig, Bma423Ex, InterruptIOCtlFlags};
-use crate::peripherals::i2c_proxy_async::I2cProxyAsync;
+use log::{debug, info, trace};
 use tokio::time::{sleep, Duration};
-use crate::error::Error;
 
 pub struct Accelerometer<'a> {
     accel_base: Bma423<Reverse<I2cProxyAsync<I2cDriver<'a>>>>,
     accel_ex: Bma423Ex<I2cProxyAsync<I2cDriver<'a>>>,
-    proxy: I2cProxyAsync<I2cDriver<'a>>
+    proxy: I2cProxyAsync<I2cDriver<'a>>,
 }
 
 pub struct Thermometer<'a> {
-    accel_ex: Bma423Ex<I2cProxyAsync<I2cDriver<'a>>>
+    accel_ex: Bma423Ex<I2cProxyAsync<I2cDriver<'a>>>,
 }
 
 impl<'a> Accelerometer<'a> {
-    pub async fn create(proxy: I2cProxyAsync<I2cDriver<'a>>, proxy_ex: I2cProxyAsync<I2cDriver<'a>>) -> Result<Accelerometer<'a>, Error> {
+    pub async fn create(
+        proxy: I2cProxyAsync<I2cDriver<'a>>,
+        proxy_ex: I2cProxyAsync<I2cDriver<'a>>,
+    ) -> Result<Accelerometer<'a>, Error> {
         let thermo_proxy = proxy.clone();
         let mut accel = Bma423::new_with_address(proxy.reverse(), 0x18);
         let mut accel_ex = Bma423Ex::new(proxy_ex);
@@ -30,17 +33,15 @@ impl<'a> Accelerometer<'a> {
 
         loop {
             if let Err(err) = accel_ex.reset_and_init(&mut delay) {
-
                 info!("err {}", err.cause());
                 if counter > 3 {
-                    return Err(Error::from(err));
+                    return Err(Error::from(err.to_string().as_str()));
                 }
 
                 sleep(Duration::from_millis(20)).await;
                 counter += 1;
                 continue;
-            }
-            else {
+            } else {
                 break;
             }
         }
@@ -48,12 +49,14 @@ impl<'a> Accelerometer<'a> {
         let internal_status = accel_ex.read_internal_status().unwrap();
         info!("internal_status = {}", internal_status);
 
-        accel.set_accel_config(
-            bma423::AccelConfigOdr::Odr100,
-            bma423::AccelConfigBandwidth::NormAvg4,
-            bma423::AccelConfigPerfMode::CicAvg,
-            bma423::AccelRange::Range2g,
-        ).unwrap();
+        accel
+            .set_accel_config(
+                bma423::AccelConfigOdr::Odr100,
+                bma423::AccelConfigBandwidth::NormAvg4,
+                bma423::AccelConfigPerfMode::CicAvg,
+                bma423::AccelRange::Range2g,
+            )
+            .unwrap();
 
         let axes_config = AxesConfig {
             x_axis: 0,
@@ -67,10 +70,17 @@ impl<'a> Accelerometer<'a> {
         accel_ex.remap_axes(axes_config).unwrap();
         accel_ex.enable_wrist_tilt().unwrap();
 
-        let int1_cfg = accel_ex.configure_int1_io_ctrl(InterruptIOCtlFlags::OutputEn | InterruptIOCtlFlags::Od).unwrap();
+        let int1_cfg = accel_ex
+            .configure_int1_io_ctrl(InterruptIOCtlFlags::OutputEn | InterruptIOCtlFlags::Od)
+            .unwrap();
         debug!("int1_cfg = {}", int1_cfg);
 
-        accel_ex.map_int1_feature_interrupt(FeatureInterruptStatus::WristWear/* | FeatureInterruptStatus::AnyMotion*/, true).unwrap();
+        accel_ex
+            .map_int1_feature_interrupt(
+                FeatureInterruptStatus::WristWear, /* | FeatureInterruptStatus::AnyMotion*/
+                true,
+            )
+            .unwrap();
 
         let feature_config = accel_ex.get_feature_config().unwrap();
         debug!("feature_config = {:02X?}", feature_config);
@@ -78,7 +88,7 @@ impl<'a> Accelerometer<'a> {
         let accel = Accelerometer {
             accel_base: accel,
             accel_ex,
-            proxy: thermo_proxy
+            proxy: thermo_proxy,
         };
 
         Ok(accel)
@@ -90,7 +100,7 @@ impl<'a> Accelerometer<'a> {
 
     pub fn get_thermometer(&self) -> Thermometer<'a> {
         Thermometer {
-            accel_ex: Bma423Ex::new(self.proxy.clone())
+            accel_ex: Bma423Ex::new(self.proxy.clone()),
         }
     }
 }

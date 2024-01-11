@@ -1,11 +1,8 @@
-use crate::peripherals::display::{ClockDisplay, ClockDisplayInterface, FrameBuffer};
-use crate::peripherals::hal::{Commands, Events};
 use time::{Duration, OffsetDateTime, Time};
 use tokio::sync::broadcast::Sender;
 
 use time::macros::format_description;
 
-use embedded_graphics::pixelcolor::Rgb565;
 use log::info;
 use profont::PROFONT_24_POINT;
 
@@ -22,13 +19,21 @@ use embedded_graphics::{
     text::Text,
 };
 use std::collections::HashSet;
+use std::marker::PhantomData;
 use std::sync::mpsc::channel;
 
-use super::calendar_module::CalendarEvent;
+use crate::calendar::CalendarEvent;
+use crate::commands::Commands;
+use crate::display_interface::ClockDisplayInterface;
+use crate::events::Events;
 
-pub struct Renderer {}
+pub struct Renderer<TDisplay> {
+    _inner: PhantomData<TDisplay>,
+}
 
-struct Graphics {}
+struct Graphics<TDisplay> {
+    _inner: PhantomData<TDisplay>,
+}
 
 pub struct ViewModel {
     is_charging: Option<bool>,
@@ -39,11 +44,11 @@ pub struct ViewModel {
     calendar_events: HashSet<CalendarEvent>,
 }
 
-impl Renderer {
-    pub async fn start<TDisplay: ClockDisplayInterface>(
-        commands: Sender<Commands>,
-        events: Sender<Events>,
-    ) {
+impl<TDisplay> Renderer<TDisplay>
+where
+    TDisplay: ClockDisplayInterface,
+{
+    pub async fn start(commands: Sender<Commands>, events: Sender<Events>) {
         let mut recv_cmd = commands.subscribe();
         let mut recv_event = events.subscribe();
 
@@ -52,7 +57,7 @@ impl Renderer {
         let (tx, rx) = channel::<Events>();
 
         let render_loop_task = tokio::task::spawn_blocking(move || {
-            Self::render_loop::<TDisplay>(rx);
+            Self::render_loop(rx);
         });
 
         loop {
@@ -87,7 +92,7 @@ impl Renderer {
         info!("done");
     }
 
-    pub fn render_time(frame: &mut FrameBuffer, vm: &ViewModel) {
+    pub fn render_time(frame: &mut TDisplay::FrameBuffer<'_>, vm: &ViewModel) {
         if vm.time.is_none() {
             return;
         }
@@ -98,9 +103,9 @@ impl Renderer {
         );
 
         let text = vm.time.unwrap().format(&template).unwrap();
-        let style_time = MonoTextStyle::new(&PROFONT_24_POINT, Rgb565::WHITE);
+        let style_time = MonoTextStyle::new(&PROFONT_24_POINT, TDisplay::ColorModel::WHITE);
 
-        Graphics::text_aligned(
+        Graphics::<TDisplay>::text_aligned(
             frame,
             &text,
             Point::new(120, 120),
@@ -120,8 +125,8 @@ impl Renderer {
         Self::draw_arrow(frame, angle, length);
     }
 
-    fn draw_arrow(frame: &mut FrameBuffer, angle: f32, length: f32) {
-        let radius = (ClockDisplayInterface::FRAME_BUFFER_WIDTH / 2) as f32;
+    fn draw_arrow(frame: &mut TDisplay::FrameBuffer<'_>, angle: f32, length: f32) {
+        let radius = (TDisplay::FRAME_BUFFER_SIDE / 2) as f32;
 
         let radius_inner = radius - length;
 
@@ -134,14 +139,14 @@ impl Renderer {
             (radius_inner * cos + radius) as i32,
         );
 
-        let style = PrimitiveStyle::with_stroke(Rgb565::RED, 3);
+        let style = PrimitiveStyle::with_stroke(TDisplay::ColorModel::RED, 3);
 
         primitives::Line::new(p1, p2)
             .draw_styled(&style, frame)
             .unwrap();
     }
 
-    pub fn render_temperature(frame: &mut FrameBuffer, vm: &ViewModel) {
+    pub fn render_temperature(frame: &mut TDisplay::FrameBuffer<'_>, vm: &ViewModel) {
         if vm.temperature.is_none() {
             return;
         }
@@ -150,10 +155,10 @@ impl Renderer {
 
         let style_time = MonoTextStyle::new(
             &embedded_graphics::mono_font::iso_8859_3::FONT_8X13,
-            Rgb565::WHITE,
+            TDisplay::ColorModel::WHITE,
         );
 
-        Graphics::text_aligned(
+        Graphics::<TDisplay>::text_aligned(
             frame,
             &text,
             Point::new(120, 140),
@@ -162,12 +167,16 @@ impl Renderer {
         );
     }
 
-    pub fn render_battery_level(frame: &mut FrameBuffer, vm: &ViewModel) {
-        let point = Point::new(120 - 18 / 2, 220);
+    pub fn render_battery_level(frame: &mut TDisplay::FrameBuffer<'_>, vm: &ViewModel) {
+        let point = Point::new(120 - 18 / 2, 215);
 
         if let Some(is_charging) = vm.is_charging {
             if is_charging {
-                Graphics::icon(frame, point, &BatteryCharging::new(Rgb565::WHITE));
+                Graphics::<TDisplay>::icon(
+                    frame,
+                    point,
+                    &BatteryCharging::new(TDisplay::ColorModel::WHITE),
+                );
             }
         }
 
@@ -176,36 +185,76 @@ impl Renderer {
         }
 
         match vm.battery_level.unwrap() {
-            91..=100 => Graphics::icon(frame, point, &BatteryHigh::new(Rgb565::WHITE)),
-            81..=90 => Graphics::icon(frame, point, &Battery90::new(Rgb565::WHITE)),
-            71..=80 => Graphics::icon(frame, point, &Battery70::new(Rgb565::WHITE)),
-            61..=70 => Graphics::icon(frame, point, &Battery60::new(Rgb565::WHITE)),
-            51..=60 => Graphics::icon(frame, point, &Battery50::new(Rgb565::WHITE)),
-            41..=50 => Graphics::icon(frame, point, &Battery40::new(Rgb565::WHITE)),
-            31..=40 => Graphics::icon(frame, point, &Battery30::new(Rgb565::WHITE)),
-            21..=30 => Graphics::icon(frame, point, &Battery20::new(Rgb565::WHITE)),
-            11..=20 => Graphics::icon(frame, point, &Battery10::new(Rgb565::WHITE)),
-            _ => Graphics::icon(frame, point, &BatteryLow::new(Rgb565::WHITE)),
+            91..=100 => Graphics::<TDisplay>::icon(
+                frame,
+                point,
+                &BatteryHigh::new(TDisplay::ColorModel::WHITE),
+            ),
+            81..=90 => Graphics::<TDisplay>::icon(
+                frame,
+                point,
+                &Battery90::new(TDisplay::ColorModel::WHITE),
+            ),
+            71..=80 => Graphics::<TDisplay>::icon(
+                frame,
+                point,
+                &Battery70::new(TDisplay::ColorModel::WHITE),
+            ),
+            61..=70 => Graphics::<TDisplay>::icon(
+                frame,
+                point,
+                &Battery60::new(TDisplay::ColorModel::WHITE),
+            ),
+            51..=60 => Graphics::<TDisplay>::icon(
+                frame,
+                point,
+                &Battery50::new(TDisplay::ColorModel::WHITE),
+            ),
+            41..=50 => Graphics::<TDisplay>::icon(
+                frame,
+                point,
+                &Battery40::new(TDisplay::ColorModel::WHITE),
+            ),
+            31..=40 => Graphics::<TDisplay>::icon(
+                frame,
+                point,
+                &Battery30::new(TDisplay::ColorModel::WHITE),
+            ),
+            21..=30 => Graphics::<TDisplay>::icon(
+                frame,
+                point,
+                &Battery20::new(TDisplay::ColorModel::WHITE),
+            ),
+            11..=20 => Graphics::<TDisplay>::icon(
+                frame,
+                point,
+                &Battery10::new(TDisplay::ColorModel::WHITE),
+            ),
+            _ => Graphics::<TDisplay>::icon(
+                frame,
+                point,
+                &BatteryLow::new(TDisplay::ColorModel::WHITE),
+            ),
         }
     }
 
-    pub fn render_sync_status(frame: &mut FrameBuffer, vm: &ViewModel) {
+    pub fn render_sync_status(frame: &mut TDisplay::FrameBuffer<'_>, vm: &ViewModel) {
         if vm.sync_status.is_none() {
             return;
         }
 
         let color = if !vm.sync_status.unwrap() {
-            Rgb565::WHITE
+            TDisplay::ColorModel::WHITE
         } else {
-            Rgb565::BLACK
+            TDisplay::ColorModel::BLACK
         };
 
         let icon = Sync::new(color);
 
-        Graphics::icon(frame, Point::new(120 - 18 / 2, 10), &icon);
+        Graphics::<TDisplay>::icon(frame, Point::new(120 - 18 / 2, 10), &icon);
     }
 
-    fn render_loop<TDisplay: ClockDisplayInterface>(mut rx: std::sync::mpsc::Receiver<Events>) {
+    fn render_loop(mut rx: std::sync::mpsc::Receiver<Events>) {
         let mut display = TDisplay::create();
 
         let mut state: ViewModel = ViewModel {
@@ -228,11 +277,7 @@ impl Renderer {
         }
     }
 
-    fn render_change(
-        display: &mut impl ClockDisplayInterface,
-        event: Events,
-        view_model: &mut ViewModel,
-    ) {
+    fn render_change(display: &mut TDisplay, event: Events, view_model: &mut ViewModel) {
         info!("{:?}", event);
         match event {
             Events::TimeNow(now) => {
@@ -263,25 +308,27 @@ impl Renderer {
         Self::render(display, view_model);
     }
 
-    fn render(display: &mut impl ClockDisplayInterface, vm: &mut ViewModel) {
-        display.render(|frame| {
-            let style = PrimitiveStyle::with_stroke(Rgb565::WHITE, 1);
+    fn render(display: &mut TDisplay, vm: &mut ViewModel) {
+        display.render(|mut frame| {
+            let style = PrimitiveStyle::with_stroke(TDisplay::ColorModel::WHITE, 1);
             let top_left = Point::new(3, 3);
-            Graphics::circle(
-                frame,
+            Graphics::<TDisplay>::circle(
+                &mut frame,
                 top_left,
-                ClockDisplayInterface::FRAME_BUFFER_WIDTH as u32 - top_left.x as u32 * 2,
+                TDisplay::FRAME_BUFFER_SIDE as u32 - top_left.x as u32 * 2,
                 style,
             );
-            Self::render_battery_level(frame, vm);
-            Self::render_sync_status(frame, vm);
-            Self::render_temperature(frame, vm);
-            Self::render_time(frame, vm);
-            Self::render_events(frame, vm);
+            Self::render_battery_level(&mut frame, vm);
+            Self::render_sync_status(&mut frame, vm);
+            Self::render_temperature(&mut frame, vm);
+            Self::render_time(&mut frame, vm);
+            Self::render_events(&mut frame, vm);
+
+            frame
         })
     }
 
-    fn render_events(frame: &mut FrameBuffer, vm: &ViewModel) {
+    fn render_events(frame: &mut TDisplay::FrameBuffer<'_>, vm: &ViewModel) {
         if vm.time.is_none() {
             return;
         }
@@ -292,7 +339,7 @@ impl Renderer {
 
         let today_midnight = now.replace_time(zero_time);
 
-        let style = PrimitiveStyle::with_stroke(Rgb565::GREEN, 2);
+        let style = PrimitiveStyle::with_stroke(TDisplay::ColorModel::GREEN, 2);
 
         for event in vm.calendar_events.iter() {
             if event.end - event.start >= Duration::hours(12) {
@@ -321,7 +368,7 @@ impl Renderer {
             let top_left = Point::new(2, 2);
             primitives::Arc::new(
                 top_left,
-                ClockDisplayInterface::FRAME_BUFFER_WIDTH as u32 - top_left.x as u32 * 2,
+                TDisplay::FRAME_BUFFER_SIDE as u32 - top_left.x as u32 * 2,
                 Angle::from_degrees(start_angle + 270.0),
                 Angle::from_degrees(angle_sweep),
             )
@@ -332,12 +379,15 @@ impl Renderer {
     }
 }
 
-impl Graphics {
+impl<TDisplay> Graphics<TDisplay>
+where
+    TDisplay: ClockDisplayInterface,
+{
     pub fn circle(
-        frame: &mut FrameBuffer,
+        frame: &mut TDisplay::FrameBuffer<'_>,
         coord: Point,
         diameter: u32,
-        style: PrimitiveStyle<Rgb565>,
+        style: PrimitiveStyle<TDisplay::ColorModel>,
     ) {
         primitives::Circle::new(coord, diameter)
             .into_styled(style)
@@ -345,15 +395,19 @@ impl Graphics {
             .unwrap();
     }
 
-    pub fn icon(frame: &mut FrameBuffer, coord: Point, icon: &impl ImageDrawable<Color = Rgb565>) {
+    pub fn icon(
+        frame: &mut TDisplay::FrameBuffer<'_>,
+        coord: Point,
+        icon: &impl ImageDrawable<Color = TDisplay::ColorModel>,
+    ) {
         Image::new(icon, coord).draw(frame).unwrap();
     }
 
     pub fn text_aligned(
-        frame: &mut FrameBuffer,
+        frame: &mut TDisplay::FrameBuffer<'_>,
         text: &str,
         coord: Point,
-        style: MonoTextStyle<Rgb565>,
+        style: MonoTextStyle<TDisplay::ColorModel>,
         alignment: Alignment,
     ) {
         let text = Text::with_alignment(text, coord, style, alignment);
@@ -361,13 +415,14 @@ impl Graphics {
 
         let mut clipped = frame.clipped(&bounding);
 
-        clipped.clear(Rgb565::BLACK).unwrap();
+        let clear_color = TDisplay::ColorModel::BLACK;
+        clipped.clear(clear_color).unwrap();
 
         text.draw(&mut clipped).unwrap();
     }
 
-    pub fn text(frame: &mut FrameBuffer, text: &str, coord: Point) {
-        let style = MonoTextStyle::new(&FONT_6X10, Rgb565::WHITE);
+    pub fn text(frame: &mut TDisplay::FrameBuffer<'_>, text: &str, coord: Point) {
+        let style = MonoTextStyle::new(&FONT_6X10, TDisplay::ColorModel::WHITE);
 
         Text::new(text, coord, style).draw(frame).unwrap();
     }

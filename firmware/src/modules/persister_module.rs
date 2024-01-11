@@ -5,16 +5,16 @@ use std::{
 };
 use tokio::sync::broadcast::Sender;
 
-use crate::{
-    error::Error,
-    peripherals::{
-        hal::{Commands, Events},
-        nvs_storage::NvsStorage,
-    },
-    persistence::{PersistenceUnit, PersistenceUnitDto},
-};
+use crate::peripherals::nvs_storage::NvsStorage;
 
 use log::{error, info};
+
+use blinky_shared::events::Events;
+use blinky_shared::{
+    commands::Commands,
+    error::Error,
+    persistence::{PersistenceUnit, PersistenceUnitDto},
+};
 
 pub struct PersisterModule {}
 

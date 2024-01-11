@@ -1,5 +1,7 @@
-use time::OffsetDateTime;
 use serde::{Deserialize, Serialize};
+use time::{OffsetDateTime, UtcOffset};
+
+use crate::calendar::CalendarEventDto;
 
 #[derive(Debug, Deserialize, PartialEq, Clone)]
 pub struct ReferenceTimeOffset {
@@ -11,14 +13,6 @@ pub struct ReferenceTimeOffset {
 pub struct GpsCoordinates {
     pub lat: f32,
     pub lon: f32,
-}
-
-#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
-pub struct CalendarEventDto {
-    pub id: i64,
-    pub title: String,
-    pub start: ReferenceTimeUtc,
-    pub end: ReferenceTimeUtc,
 }
 
 #[derive(Debug, Deserialize, PartialEq, Clone)]
@@ -51,11 +45,24 @@ pub struct TouchPosition {
     pub y: i32,
 }
 
+impl From<OffsetDateTime> for ReferenceTimeUtc {
+    fn from(value: OffsetDateTime) -> Self {
+        ReferenceTimeUtc {
+            unix_epoch_seconds: value.unix_timestamp(),
+        }
+    }
+}
 
-#[derive(Clone, Debug)]
-pub struct CalendarEvent {
-    pub id: i64,
-    pub title: String,
-    pub start: OffsetDateTime,
-    pub end: OffsetDateTime,
+impl Into<OffsetDateTime> for ReferenceTimeUtc {
+    fn into(self) -> OffsetDateTime {
+        OffsetDateTime::from_unix_timestamp(self.unix_epoch_seconds).unwrap()
+    }
+}
+
+impl ReferenceTimeUtc {
+    pub fn to_offset_dt(self, tz: UtcOffset) -> OffsetDateTime {
+        OffsetDateTime::from_unix_timestamp(self.unix_epoch_seconds + tz.whole_seconds() as i64)
+            .unwrap()
+            .replace_offset(tz)
+    }
 }

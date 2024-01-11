@@ -1,7 +1,4 @@
-use crate::peripherals::{
-    hal::{Commands, Events},
-    i2c_proxy_async::I2cProxyAsync,
-};
+use crate::peripherals::i2c_proxy_async::I2cProxyAsync;
 use esp_idf_hal::i2c::I2cDriver;
 use log::info;
 use time::{PrimitiveDateTime, UtcOffset};
@@ -9,6 +6,9 @@ use tokio::sync::broadcast::Sender;
 
 use crate::peripherals::rtc::Rtc;
 use log::debug;
+
+use blinky_shared::commands::Commands;
+use blinky_shared::events::Events;
 
 pub struct RtcModule {}
 

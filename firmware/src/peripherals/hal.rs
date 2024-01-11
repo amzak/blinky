@@ -1,15 +1,9 @@
-use crate::modules::calendar_module::CalendarEvent;
-use crate::modules::reference_time::ReferenceData;
-use crate::modules::touch_module::TouchPosition;
 use crate::peripherals::i2c_management::I2cManagement;
 use crate::peripherals::i2c_proxy_async::I2cProxyAsync;
 use crate::peripherals::touchpad::TouchpadConfig;
-use crate::persistence::{PersistenceUnit, PersistenceUnitKind};
 use esp_idf_hal::gpio::{Gpio25, Gpio26, IOPin};
 use esp_idf_hal::i2c::{I2cConfig, I2cDriver, I2C0};
 use esp_idf_hal::units::FromValueType;
-
-use time::OffsetDateTime;
 
 pub struct HAL<'d> {
     i2c_manager: I2cManagement<'d>,
@@ -63,42 +57,4 @@ pub enum WakeupCause {
     Timer,
     Touch,
     Ulp,
-}
-
-#[derive(Clone, Debug)]
-pub enum Commands {
-    RequestReferenceData,
-    SyncRtc,
-    SyncCalendar,
-    GetTimeNow,
-    GetReferenceTime,
-    SetTime(OffsetDateTime),
-    StartDeepSleep,
-    PauseRendering,
-    ResumeRendering,
-    GetTemperature,
-    Persist(PersistenceUnit),
-    Restore(PersistenceUnitKind),
-}
-
-#[derive(Clone, Debug)]
-pub enum Events {
-    TimeNow(OffsetDateTime),
-    Timezone(i32),
-    BluetoothConnected,
-    ReferenceData(ReferenceData),
-    ReferenceTime(OffsetDateTime),
-    Wakeup(WakeupCause),
-    TouchOrMove,
-    TouchPos(TouchPosition),
-    IncomingData(Vec<u8>),
-    Temperature(f32),
-    BatteryLevel(u16),
-    Charging(bool),
-    InSync(bool),
-    ReferenceCalendarEvent(CalendarEvent),
-    ReferenceCalendarEventsCount(i32),
-    CalendarEvent(CalendarEvent),
-    Restored(PersistenceUnit),
-    Term,
 }

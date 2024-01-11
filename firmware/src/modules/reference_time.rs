@@ -1,5 +1,4 @@
-use crate::modules::calendar_module::CalendarEvent;
-use crate::peripherals::hal::{Commands, Events};
+use blinky_shared::calendar::{CalendarEvent, CalendarEventDto};
 use log::{error, info};
 use serde::{Deserialize, Serialize};
 use std::ops::Add;
@@ -7,7 +6,8 @@ use time::{OffsetDateTime, UtcOffset};
 use tokio::sync::broadcast::Sender;
 use tokio::time::Duration;
 
-use super::calendar_module::CalendarEventDto;
+use blinky_shared::commands::Commands;
+use blinky_shared::events::Events;
 
 pub struct ReferenceTime {}
 

@@ -1,9 +1,11 @@
-use crate::peripherals::hal::{Commands, Events};
 use crate::peripherals::i2c_proxy_async::I2cProxyAsync;
 use crate::peripherals::touchpad::{Touchpad, TouchpadConfig};
 use esp_idf_hal::i2c::I2cDriver;
 use log::info;
 use tokio::sync::broadcast::Sender;
+
+use blinky_shared::commands::Commands;
+use blinky_shared::events::Events;
 
 #[derive(Clone, Debug)]
 pub struct TouchPosition {
