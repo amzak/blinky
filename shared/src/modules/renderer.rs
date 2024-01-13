@@ -1,14 +1,18 @@
+use embedded_graphics::text::renderer::TextRenderer;
 use time::{Duration, OffsetDateTime, Time};
 use tokio::sync::broadcast::Sender;
 
 use time::macros::format_description;
 
 use log::info;
-use profont::PROFONT_24_POINT;
 
 use embedded_icon::mdi::size18px::*;
 use embedded_icon::prelude::*;
 
+use crate::calendar::CalendarEvent;
+use crate::commands::Commands;
+use crate::display_interface::ClockDisplayInterface;
+use crate::events::Events;
 use embedded_graphics::primitives::{PrimitiveStyle, StyledDrawable};
 use embedded_graphics::text::Alignment;
 use embedded_graphics::{
@@ -21,11 +25,7 @@ use embedded_graphics::{
 use std::collections::HashSet;
 use std::marker::PhantomData;
 use std::sync::mpsc::channel;
-
-use crate::calendar::CalendarEvent;
-use crate::commands::Commands;
-use crate::display_interface::ClockDisplayInterface;
-use crate::events::Events;
+use u8g2_fonts::{fonts, U8g2TextStyle};
 
 pub struct Renderer<TDisplay> {
     _inner: PhantomData<TDisplay>,
@@ -92,27 +92,61 @@ where
         info!("done");
     }
 
-    pub fn render_time(frame: &mut TDisplay::FrameBuffer<'_>, vm: &ViewModel) {
+    fn render_datetime(frame: &mut TDisplay::FrameBuffer<'_>, vm: &ViewModel) {
         if vm.time.is_none() {
             return;
         }
 
-        let template = format_description!(
-            version = 2,
-            "[weekday repr:short] [hour repr:24]:[minute]:[second]"
-        );
+        let bounds = Self::render_time(frame, vm);
+        Self::render_day(frame, vm, &bounds);
 
-        let text = vm.time.unwrap().format(&template).unwrap();
-        let style_time = MonoTextStyle::new(&PROFONT_24_POINT, TDisplay::ColorModel::WHITE);
+        Self::draw_arrow(frame, vm);
+    }
+
+    fn render_time(frame: &mut TDisplay::FrameBuffer<'_>, vm: &ViewModel) -> primitives::Rectangle {
+        let time_template = format_description!(version = 2, "[hour repr:24]:[minute]:[second]");
+
+        let time_text_style =
+            U8g2TextStyle::new(fonts::u8g2_font_spleen16x32_mn, TDisplay::ColorModel::WHITE);
+
+        let time_as_text = vm.time.unwrap().format(&time_template).unwrap();
+
+        let position = Point::new(120 - 10, 120);
 
         Graphics::<TDisplay>::text_aligned(
             frame,
-            &text,
-            Point::new(120, 120),
-            style_time,
+            &time_as_text,
+            position,
+            time_text_style,
+            embedded_graphics::text::Alignment::Center,
+        )
+    }
+
+    fn render_day(
+        frame: &mut TDisplay::FrameBuffer<'_>,
+        vm: &ViewModel,
+        time_text_bounds: &primitives::Rectangle,
+    ) {
+        let day_template = format_description!(version = 2, "[weekday repr:short]");
+
+        let day_text_style = U8g2TextStyle::new(fonts::u8g2_font_wqy16_t_gb2312b, RgbColor::WHITE);
+
+        let day_as_text = vm.time.unwrap().format(&day_template).unwrap();
+
+        let half_width = time_text_bounds.size.width as i32 / 2;
+
+        let top_left = Point::new(120 + half_width + 10, 120);
+
+        Graphics::<TDisplay>::text_aligned(
+            frame,
+            &day_as_text,
+            top_left,
+            day_text_style,
             embedded_graphics::text::Alignment::Center,
         );
+    }
 
+    fn draw_arrow(frame: &mut TDisplay::FrameBuffer<'_>, vm: &ViewModel) {
         let now = vm.time.unwrap();
 
         let zero_time = Time::from_hms(0, 0, 0).unwrap();
@@ -122,10 +156,6 @@ where
         let angle = ((time_pos.whole_minutes() as f32 / (12.0 * 60.0)) * 360.0) % 360.0;
         let length: f32 = 5.0;
 
-        Self::draw_arrow(frame, angle, length);
-    }
-
-    fn draw_arrow(frame: &mut TDisplay::FrameBuffer<'_>, angle: f32, length: f32) {
         let radius = (TDisplay::FRAME_BUFFER_SIDE / 2) as f32;
 
         let radius_inner = radius - length;
@@ -321,7 +351,7 @@ where
             Self::render_battery_level(&mut frame, vm);
             Self::render_sync_status(&mut frame, vm);
             Self::render_temperature(&mut frame, vm);
-            Self::render_time(&mut frame, vm);
+            Self::render_datetime(&mut frame, vm);
             Self::render_events(&mut frame, vm);
 
             frame
@@ -407,18 +437,20 @@ where
         frame: &mut TDisplay::FrameBuffer<'_>,
         text: &str,
         coord: Point,
-        style: MonoTextStyle<TDisplay::ColorModel>,
+        style: impl TextRenderer<Color = TDisplay::ColorModel>,
         alignment: Alignment,
-    ) {
+    ) -> primitives::Rectangle {
         let text = Text::with_alignment(text, coord, style, alignment);
-        let bounding = text.bounding_box();
+        let bounding_box = text.bounding_box();
 
-        let mut clipped = frame.clipped(&bounding);
+        let mut clipped = frame.clipped(&bounding_box);
 
         let clear_color = TDisplay::ColorModel::BLACK;
         clipped.clear(clear_color).unwrap();
 
         text.draw(&mut clipped).unwrap();
+
+        bounding_box
     }
 
     pub fn text(frame: &mut TDisplay::FrameBuffer<'_>, text: &str, coord: Point) {
