@@ -91,6 +91,15 @@ where
         Self::render_day(frame, vm, &bounds);
 
         Self::draw_arrow(frame, vm);
+
+        let style = PrimitiveStyle::with_stroke(TDisplay::ColorModel::WHITE, 1);
+        let top_left = Point::new(3, 3);
+        Graphics::<TDisplay>::circle(
+            frame,
+            top_left,
+            TDisplay::FRAME_BUFFER_SIDE as u32 - top_left.x as u32 * 2,
+            style,
+        );
     }
 
     fn render_time(frame: &mut TDisplay::FrameBuffer<'_>, vm: &ViewModel) -> primitives::Rectangle {
@@ -330,14 +339,6 @@ where
 
     fn render(display: &mut TDisplay, vm: &mut ViewModel) {
         display.render(|mut frame| {
-            let style = PrimitiveStyle::with_stroke(TDisplay::ColorModel::WHITE, 1);
-            let top_left = Point::new(3, 3);
-            Graphics::<TDisplay>::circle(
-                &mut frame,
-                top_left,
-                TDisplay::FRAME_BUFFER_SIDE as u32 - top_left.x as u32 * 2,
-                style,
-            );
             Self::render_battery_level(&mut frame, vm);
             Self::render_sync_status(&mut frame, vm);
             Self::render_temperature(&mut frame, vm);
