@@ -1,13 +1,14 @@
 use crate::calendar::CalendarEvent;
 use crate::domain::{ReferenceData, TouchPosition, WakeupCause};
 use crate::persistence::PersistenceUnit;
+use strum_macros::AsRefStr;
 use time::OffsetDateTime;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, AsRefStr)]
 pub enum Events {
     TimeNow(OffsetDateTime),
-    Timezone(i32),
     BluetoothConnected,
+    BluetoothDisconnected,
     ReferenceData(ReferenceData),
     ReferenceTime(OffsetDateTime),
     Wakeup(WakeupCause),
@@ -19,7 +20,6 @@ pub enum Events {
     Charging(bool),
     InSync(bool),
     ReferenceCalendarEvent(CalendarEvent),
-    ReferenceCalendarEventsCount(i32),
     CalendarEvent(CalendarEvent),
     Restored(PersistenceUnit),
     Term,

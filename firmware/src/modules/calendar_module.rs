@@ -1,7 +1,4 @@
-use std::{
-    collections::HashSet,
-    hash::{Hash, Hasher},
-};
+use std::collections::HashSet;
 
 use crate::modules::reference_time::ReferenceTimeUtc;
 use log::{error, info, warn};
@@ -29,7 +26,7 @@ pub struct CalendarStateDto {
 impl CalendarStateDto {
     pub fn new(events: Vec<CalendarEventDto>, last_sync: ReferenceTimeUtc) -> Self {
         Self {
-            version: 1,
+            version: 2,
             events,
             last_sync,
         }
@@ -46,16 +43,18 @@ impl CalendarModule {
         let mut now: Option<OffsetDateTime> = None;
         let mut utc_offset: Option<UtcOffset> = None;
 
-        let mut expected_reference_events_count: Option<i32> = None;
-        let mut actual_reference_events: i32 = 0;
-
         loop {
             tokio::select! {
                 Ok(command) = recv_cmd.recv() => {
-                    info!("{:?}", command);
                     match command {
                         Commands::SyncCalendar => {
                             events.send(Events::InSync(false)).unwrap();
+                        }
+                        Commands::SetTimezone(offset) => {
+                            utc_offset = Some(UtcOffset::from_whole_seconds(offset).unwrap());
+                            commands
+                                .send(Commands::Restore(PersistenceUnitKind::CalendarSyncInfo))
+                                .unwrap();
                         }
                         Commands::StartDeepSleep => {
                             break;
@@ -64,13 +63,9 @@ impl CalendarModule {
                     }
                 },
                 Ok(event) = recv_event.recv() => {
-                    info!("{:?}", event);
                     match event {
                         Events::TimeNow(time_now) => {
                             now = Some(time_now);
-                        }
-                        Events::ReferenceCalendarEventsCount(events_count) => {
-                            expected_reference_events_count = Some(events_count);
                         }
                         Events::ReferenceCalendarEvent(reference_calendar_event) => {
                             let replaced = calendar_events.replace(reference_calendar_event.clone());
@@ -80,19 +75,17 @@ impl CalendarModule {
                             }
 
                             events.send(Events::CalendarEvent(reference_calendar_event)).unwrap();
-
-                            actual_reference_events += 1;
-
-                            if expected_reference_events_count.is_some() && actual_reference_events == expected_reference_events_count.unwrap() {
-                                Self::persist_events(&commands, Vec::from_iter(calendar_events.iter().map(|x| x.clone())), &now);
+                        }
+                        Events::BluetoothDisconnected => {
+                            if calendar_events.len() == 0 {
+                                continue;
                             }
+
+                            Self::persist_events(&commands, Vec::from_iter(calendar_events.iter().map(|x| x.clone())), &now);
+
+                            info!("events persisted");
                         }
-                        Events::Timezone(offset) => {
-                            utc_offset = Some(UtcOffset::from_whole_seconds(offset).unwrap());
-                            commands
-                                .send(Commands::Restore(PersistenceUnitKind::CalendarSyncInfo))
-                                .unwrap();
-                        }
+
                         Events::Restored(unit) => {
                             if !matches!(unit.kind, PersistenceUnitKind::CalendarSyncInfo) {
                                 continue;
@@ -129,7 +122,10 @@ impl CalendarModule {
 
         match res {
             Ok(calendar_info_restored) => {
-                info!("{:?}", calendar_info_restored);
+                info!(
+                    "calendar events restored: {}",
+                    calendar_info_restored.events.len()
+                );
 
                 let calendar_events_restored = calendar_info_restored
                     .events

@@ -8,6 +8,7 @@ use crate::error::Error;
 #[derive(Debug, Serialize, Deserialize, Clone, AsRefStr, Hash, Copy)]
 pub enum PersistenceUnitKind {
     RtcSyncInfo,
+    CalendarEventInfo,
     CalendarSyncInfo,
 }
 

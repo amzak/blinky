@@ -1,14 +1,19 @@
+use embedded_graphics::pixelcolor::raw::RawU16;
+use time::Instant;
 use time::{Duration, OffsetDateTime, Time};
+use tokio::runtime::{Builder, Handle};
 use tokio::sync::broadcast::Sender;
 
 use time::macros::format_description;
 
-use log::info;
+use log::{debug, info};
 
 use embedded_icon::mdi::size18px::*;
 use embedded_icon::prelude::*;
+use tokio::sync::mpsc::{channel, Receiver};
 
 use crate::calendar::CalendarEvent;
+use crate::calendar::CalendarEventIcon;
 use crate::commands::Commands;
 use crate::display_interface::ClockDisplayInterface;
 use crate::events::Events;
@@ -16,10 +21,13 @@ use embedded_graphics::primitives::{PrimitiveStyle, StyledDrawable};
 use embedded_graphics::{mono_font::MonoTextStyle, prelude::*, primitives};
 use std::collections::HashSet;
 use std::marker::PhantomData;
-use std::sync::mpsc::channel;
+use std::ops::Add;
+use std::thread;
 use u8g2_fonts::{fonts, U8g2TextStyle};
 
 use super::graphics::Graphics;
+use super::renderer_icons::render_battery_level_icon;
+use super::renderer_icons::render_event_icon;
 
 pub struct Renderer<TDisplay> {
     _inner: PhantomData<TDisplay>,
@@ -44,7 +52,7 @@ where
 
         let mut pause = false;
 
-        let (tx, rx) = channel::<Events>();
+        let (tx, rx) = channel::<Events>(32);
 
         let render_loop_task = tokio::task::spawn_blocking(move || {
             Self::render_loop(rx);
@@ -61,7 +69,7 @@ where
                             pause = false;
                         }
                         Commands::StartDeepSleep => {
-                            tx.send(Events::Term).unwrap();
+                            tx.send(Events::Term).await.unwrap();
                             break;
                         }
                         _ => {}
@@ -72,10 +80,12 @@ where
                         continue;
                     }
 
-                    tx.send(event).unwrap();
+                    tx.send(event).await.unwrap();
                 }
             }
         }
+
+        info!("waiting for render loop...");
 
         render_loop_task.await.unwrap();
 
@@ -89,7 +99,6 @@ where
 
         let bounds = Self::render_time(frame, vm);
         Self::render_day(frame, vm, &bounds);
-
         Self::draw_arrow(frame, vm);
 
         let style = PrimitiveStyle::with_stroke(TDisplay::ColorModel::WHITE, 1);
@@ -156,23 +165,47 @@ where
         let length: f32 = 5.0;
 
         let radius = (TDisplay::FRAME_BUFFER_SIDE / 2) as f32;
-
-        let radius_inner = radius - length;
-
-        let (sin, cos) = (180.0 - angle).to_radians().sin_cos();
-
-        let p1 = Point::new((radius * (sin + 1.0)) as i32, (radius * (cos + 1.0)) as i32);
-
-        let p2 = Point::new(
-            (radius_inner * sin + radius) as i32,
-            (radius_inner * cos + radius) as i32,
-        );
+        let thickness = 3;
 
         let style = PrimitiveStyle::with_stroke(TDisplay::ColorModel::RED, 3);
+
+        Self::draw_radial_line::<TDisplay::ColorModel>(
+            frame,
+            Angle::from_degrees(angle),
+            radius,
+            length,
+            style,
+        );
+    }
+
+    fn draw_radial_line<C>(
+        frame: &mut TDisplay::FrameBuffer<'_>,
+        angle: Angle,
+        initial_radius: f32,
+        length: f32,
+        style: PrimitiveStyle<TDisplay::ColorModel>,
+    ) -> Point {
+        let radius_inner = initial_radius - length;
+
+        let (sin, cos) = (Angle::from_radians(std::f32::consts::PI) - angle)
+            .to_radians()
+            .sin_cos();
+
+        let p1 = Point::new(
+            (initial_radius * (sin + 1.0)) as i32,
+            (initial_radius * (cos + 1.0)) as i32,
+        );
+
+        let p2 = Point::new(
+            (radius_inner * sin + initial_radius) as i32,
+            (radius_inner * cos + initial_radius) as i32,
+        );
 
         primitives::Line::new(p1, p2)
             .draw_styled(&style, frame)
             .unwrap();
+
+        p2
     }
 
     pub fn render_temperature(frame: &mut TDisplay::FrameBuffer<'_>, vm: &ViewModel) {
@@ -197,15 +230,17 @@ where
     }
 
     pub fn render_battery_level(frame: &mut TDisplay::FrameBuffer<'_>, vm: &ViewModel) {
-        let point = Point::new(120 - 18 / 2, 215);
+        let point = Point::new(120, 215);
 
         if let Some(is_charging) = vm.is_charging {
             if is_charging {
-                Graphics::<TDisplay>::icon(
+                Graphics::<TDisplay>::icon_center(
                     frame,
                     point,
                     &BatteryCharging::new(TDisplay::ColorModel::WHITE),
                 );
+
+                return;
             }
         }
 
@@ -213,58 +248,12 @@ where
             return;
         }
 
-        match vm.battery_level.unwrap() {
-            91..=100 => Graphics::<TDisplay>::icon(
-                frame,
-                point,
-                &BatteryHigh::new(TDisplay::ColorModel::WHITE),
-            ),
-            81..=90 => Graphics::<TDisplay>::icon(
-                frame,
-                point,
-                &Battery90::new(TDisplay::ColorModel::WHITE),
-            ),
-            71..=80 => Graphics::<TDisplay>::icon(
-                frame,
-                point,
-                &Battery70::new(TDisplay::ColorModel::WHITE),
-            ),
-            61..=70 => Graphics::<TDisplay>::icon(
-                frame,
-                point,
-                &Battery60::new(TDisplay::ColorModel::WHITE),
-            ),
-            51..=60 => Graphics::<TDisplay>::icon(
-                frame,
-                point,
-                &Battery50::new(TDisplay::ColorModel::WHITE),
-            ),
-            41..=50 => Graphics::<TDisplay>::icon(
-                frame,
-                point,
-                &Battery40::new(TDisplay::ColorModel::WHITE),
-            ),
-            31..=40 => Graphics::<TDisplay>::icon(
-                frame,
-                point,
-                &Battery30::new(TDisplay::ColorModel::WHITE),
-            ),
-            21..=30 => Graphics::<TDisplay>::icon(
-                frame,
-                point,
-                &Battery20::new(TDisplay::ColorModel::WHITE),
-            ),
-            11..=20 => Graphics::<TDisplay>::icon(
-                frame,
-                point,
-                &Battery10::new(TDisplay::ColorModel::WHITE),
-            ),
-            _ => Graphics::<TDisplay>::icon(
-                frame,
-                point,
-                &BatteryLow::new(TDisplay::ColorModel::WHITE),
-            ),
-        }
+        render_battery_level_icon::<TDisplay>(
+            frame,
+            vm.battery_level.unwrap(),
+            point,
+            TDisplay::ColorModel::WHITE,
+        );
     }
 
     pub fn render_sync_status(frame: &mut TDisplay::FrameBuffer<'_>, vm: &ViewModel) {
@@ -283,7 +272,7 @@ where
         Graphics::<TDisplay>::icon(frame, Point::new(120 - 18 / 2, 10), &icon);
     }
 
-    fn render_loop(mut rx: std::sync::mpsc::Receiver<Events>) {
+    fn render_loop(mut rx: Receiver<Events>) {
         let mut display = TDisplay::create();
 
         let mut state: ViewModel = ViewModel {
@@ -295,19 +284,28 @@ where
             calendar_events: HashSet::new(),
         };
 
+        let handle = Handle::current();
+
         loop {
-            let event = rx.recv().unwrap();
+            let event_opt = handle.block_on(rx.recv());
+
+            if event_opt.is_none() {
+                break;
+            }
+
+            let event = event_opt.unwrap();
 
             if matches!(event, Events::Term) {
                 break;
             }
 
-            Self::render_change(&mut display, event, &mut state)
+            Self::render_change(&mut display, event, &mut state);
         }
+
+        info!("renderer loop done");
     }
 
     fn render_change(display: &mut TDisplay, event: Events, view_model: &mut ViewModel) {
-        info!("{:?}", event);
         match event {
             Events::TimeNow(now) => {
                 view_model.time = Some(now);
@@ -339,11 +337,32 @@ where
 
     fn render(display: &mut TDisplay, vm: &mut ViewModel) {
         display.render(|mut frame| {
+            let now = Instant::now();
+
             Self::render_battery_level(&mut frame, vm);
+
+            let timing_battery = now.elapsed();
+
             Self::render_sync_status(&mut frame, vm);
+
+            let timing_sync = now.elapsed();
+
             Self::render_temperature(&mut frame, vm);
+
+            let timing_tmpr = now.elapsed();
+
             Self::render_datetime(&mut frame, vm);
+
+            let timing_datetime = now.elapsed();
+
             Self::render_events(&mut frame, vm);
+
+            let timing_events = now.elapsed();
+
+            debug!(
+                "rendering timing: battery {} sync {} tmpr {} datetime {} events {}",
+                timing_battery, timing_sync, timing_tmpr, timing_datetime, timing_events
+            );
 
             frame
         })
@@ -360,42 +379,117 @@ where
 
         let today_midnight = now.replace_time(zero_time);
 
-        let style = PrimitiveStyle::with_stroke(TDisplay::ColorModel::GREEN, 2);
+        let half_day = Duration::hours(12);
+
+        debug!("rendering {} events...", vm.calendar_events.len());
 
         for event in vm.calendar_events.iter() {
-            if event.end - event.start >= Duration::hours(12) {
+            if event.end - event.start >= half_day {
                 continue;
             }
 
-            let event_start_rel = event.start - today_midnight;
-            let event_end_rel = event.end - today_midnight;
+            if now - event.start > half_day {
+                continue;
+            }
 
-            let start_angle =
-                ((event_start_rel.whole_minutes() as f32 / (12.0 * 60.0)) * 360.0) % 360.0;
-            let end_angle =
-                ((event_end_rel.whole_minutes() as f32 / (12.0 * 60.0)) * 360.0) % 360.0;
-
-            let angle_sweep = if event_start_rel == event_end_rel {
-                2.0
-            } else {
-                end_angle - start_angle
-            };
-
-            info!(
-                "event {} {} {} {} {}",
-                event_start_rel, event_end_rel, start_angle, end_angle, angle_sweep
-            );
-
-            let top_left = Point::new(2, 2);
-            primitives::Arc::new(
-                top_left,
-                TDisplay::FRAME_BUFFER_SIDE as u32 - top_left.x as u32 * 2,
-                Angle::from_degrees(start_angle + 270.0),
-                Angle::from_degrees(angle_sweep),
-            )
-            .into_styled(style)
-            .draw(frame)
-            .unwrap();
+            Self::render_event(frame, &event, &now);
         }
+    }
+
+    fn render_event(
+        frame: &mut TDisplay::FrameBuffer<'_>,
+        event: &CalendarEvent,
+        now_ref: &OffsetDateTime,
+    ) {
+        let now = *now_ref;
+        let event_start_rel = if event.start > now {
+            event.start - now
+        } else {
+            Duration::ZERO
+        };
+
+        let half_a_day = Duration::hours(12);
+
+        let event_end_rel = if event.end > now.add(half_a_day) {
+            half_a_day
+        } else {
+            event.end - now
+        };
+
+        let start_angle = Angle::from_degrees(
+            ((event_start_rel.whole_minutes() as f32 / (12.0 * 60.0)) * 360.0) % 360.0,
+        );
+
+        let end_angle = Angle::from_degrees(
+            ((event_end_rel.whole_minutes() as f32 / (12.0 * 60.0)) * 360.0) % 360.0,
+        );
+
+        debug!(
+            "event {} - {} {:?} - {:?}",
+            event.start, event.end, start_angle, end_angle
+        );
+
+        let angle_sweep = if event_start_rel == event_end_rel {
+            Angle::from_degrees(2.0)
+        } else {
+            end_angle - start_angle
+        };
+
+        let color = if event.color == 0 {
+            TDisplay::ColorModel::WHITE
+        } else {
+            TDisplay::ColorModel::from(RawU16::from_u32(event.color))
+        };
+
+        let style = PrimitiveStyle::with_stroke(color, 2);
+
+        let three_quaters = Angle::from_degrees(270.0);
+        let start = start_angle + three_quaters;
+
+        let top_left = Point::new(2, 2);
+
+        debug!("arc from {:?} sweep {:?}", start, angle_sweep);
+
+        primitives::Arc::new(
+            top_left,
+            TDisplay::FRAME_BUFFER_SIDE as u32 - top_left.x as u32 * 2,
+            start,
+            angle_sweep,
+        )
+        .into_styled(style)
+        .draw(frame)
+        .unwrap();
+
+        Self::draw_event_tag(frame, start_angle, event.icon, color);
+    }
+
+    fn draw_event_tag(
+        frame: &mut TDisplay::FrameBuffer<'_>,
+        angle: Angle,
+        icon: CalendarEventIcon,
+        color: TDisplay::ColorModel,
+    ) {
+        let initial_radius: f32 = TDisplay::FRAME_BUFFER_SIDE as f32 / 2.0;
+        let length = 25_f32;
+        let thickness = 1;
+
+        let style = PrimitiveStyle::with_stroke(TDisplay::ColorModel::WHITE, thickness);
+
+        let end_point = Self::draw_radial_line::<TDisplay::ColorModel>(
+            frame,
+            angle,
+            initial_radius,
+            length,
+            style,
+        );
+
+        let mut solid_style = PrimitiveStyle::with_stroke(TDisplay::ColorModel::WHITE, thickness);
+        solid_style.fill_color = Some(TDisplay::ColorModel::BLACK);
+
+        primitives::Circle::with_center(end_point, 18)
+            .draw_styled(&solid_style, frame)
+            .unwrap();
+
+        render_event_icon::<TDisplay>(frame, icon, end_point, color);
     }
 }

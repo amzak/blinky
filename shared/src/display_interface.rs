@@ -1,9 +1,12 @@
-use embedded_graphics::{draw_target::DrawTarget, pixelcolor::RgbColor};
+use embedded_graphics::{
+    draw_target::DrawTarget,
+    pixelcolor::{raw::RawU16, RgbColor},
+};
 use std::fmt::Debug;
 
 pub trait ClockDisplayInterface {
     type Error: Debug;
-    type ColorModel: RgbColor;
+    type ColorModel: RgbColor + From<RawU16>;
     type FrameBuffer<'b>: DrawTarget<Error = Self::Error, Color = Self::ColorModel>;
 
     const FRAME_BUFFER_SIDE: usize;

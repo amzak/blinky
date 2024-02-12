@@ -29,7 +29,7 @@ impl NvsStorage {
 
         let len_opt = self
             .nvs
-            .len(trimmed_key)
+            .blob_len(trimmed_key)
             .map_err(|_| Box::<Error>::from("nvs len error"))
             .unwrap();
 
@@ -59,7 +59,7 @@ impl NvsStorage {
 
         let len_opt = self
             .nvs
-            .len(trimmed_key)
+            .blob_len(trimmed_key)
             .map_err(|_| Box::<Error>::from("nvs len error"))
             .unwrap();
 

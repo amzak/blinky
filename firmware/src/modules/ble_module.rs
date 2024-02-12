@@ -24,10 +24,12 @@ impl BleModule {
 
         let (tx, rx) = channel::<Commands>();
 
-        let ble_task = tokio::task::spawn_blocking(move || {
-            Self::setup_bluetooth(events_channel.clone(), rx);
-        });
-
+        let ble_task = tokio::task::Builder::new()
+            .name("ble loop")
+            .spawn_blocking(move || {
+                Self::setup_bluetooth(events_channel.clone(), rx);
+            })
+            .unwrap();
         loop {
             tokio::select! {
                 Ok(command) = recv_cmd.recv() => {
@@ -50,10 +52,7 @@ impl BleModule {
         info!("done.");
     }
 
-    fn setup_bluetooth(
-        events_channel: Sender<Events>,
-        mut rx: std::sync::mpsc::Receiver<Commands>,
-    ) {
+    fn setup_bluetooth(events_channel: Sender<Events>, rx: std::sync::mpsc::Receiver<Commands>) {
         let command = rx.recv().unwrap();
 
         if matches!(command, Commands::StartDeepSleep) {
@@ -70,6 +69,12 @@ impl BleModule {
         server.on_connect(move |server, desc| {
             info!("client connected");
             events.send(Events::BluetoothConnected).unwrap();
+        });
+
+        let events_b = events_channel.clone();
+        server.on_disconnect(move |server, desc| {
+            info!("client disconnected");
+            events_b.send(Events::BluetoothDisconnected).unwrap();
         });
 
         let service = server.create_service(Self::SERVICE_GUID);
@@ -99,15 +104,17 @@ impl BleModule {
                 info!("Read from writable characteristic.");
             })
             .on_write(move |args| {
+                let data = args.recv_data();
                 events_channel
-                    .send(Events::IncomingData(Vec::from(args.recv_data)))
+                    .send(Events::IncomingData(Vec::from(data)))
                     .unwrap();
             });
 
         let advertising = ble_device.get_advertising();
 
-        if !advertising.is_advertising() {
+        if !advertising.lock().is_advertising() {
             if let Err(error) = advertising
+                .lock()
                 .name(Self::DEVICE_NAME)
                 .add_service_uuid(Self::SERVICE_GUID)
                 .start_with_duration(15_000)

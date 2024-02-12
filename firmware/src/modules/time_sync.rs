@@ -47,7 +47,6 @@ impl TimeSync {
         loop {
             select! {
                 Ok(command) = recv_cmd.recv() => {
-                    info!("{:?}", command);
                     match command {
                         Commands::SyncRtc => {
                             commands
@@ -68,7 +67,6 @@ impl TimeSync {
                     }
                 },
                 Ok(event) = recv_event.recv() => {
-                    info!("{:?}", event);
                     match event {
                         Events::TimeNow(time) => {
                             if now.is_some() {
@@ -113,7 +111,7 @@ impl TimeSync {
                                     sync_info = Some(sync_info_restored);
 
                                     let utc_offset = sync_info.as_ref().unwrap().offset;
-                                    events.send(Events::Timezone(utc_offset)).unwrap();
+                                    commands.send(Commands::SetTimezone(utc_offset)).unwrap();
 
                                     if Self::is_sync_required(&now, &sync_info) {
                                         commands.send(Commands::GetReferenceTime).unwrap();
@@ -177,7 +175,7 @@ impl TimeSync {
 
         loop {
             select! {
-                Ok(flag) = pause.changed() => {
+                Ok(_) = pause.changed() => {
                     let val = pause.borrow_and_update();
                     pause_flag = *val;
                 }

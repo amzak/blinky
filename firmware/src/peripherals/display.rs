@@ -10,11 +10,13 @@ use esp_idf_hal::spi;
 use esp_idf_hal::spi::config::DriverConfig;
 use esp_idf_hal::spi::{Dma, SpiDeviceDriver, SpiDriver, SpiSingleDeviceDriver, SPI2};
 use esp_idf_hal::units::FromValueType;
+use log::{debug, info};
 use mipidsi::models::GC9A01;
 use mipidsi::{Builder, Display};
 use std::convert::Infallible;
 use std::error::Error;
 use std::fmt::Debug;
+use time::Instant;
 
 pub type EspSpi1InterfaceNoCS<'d> =
     SPIInterfaceNoCS<SpiSingleDeviceDriver<'d>, PinDriver<'d, Gpio19, InputOutput>>;
@@ -53,7 +55,7 @@ impl<'a> ClockDisplayInterface for ClockDisplay<'a> {
         let driver = SpiDriver::new(spi, sclk, sdo, None::<AnyIOPin>, &config).unwrap();
 
         let spi_config = spi::config::Config::default()
-            .baudrate(40_000_000.Hz())
+            .baudrate(80_000_000.Hz())
             .write_only(true);
 
         let spi = SpiDeviceDriver::new(driver, Some(cs), &spi_config).unwrap();
@@ -90,14 +92,28 @@ impl<'a> ClockDisplayInterface for ClockDisplay<'a> {
         );
 
         let frame_size = frame.size();
+
+        let now = Instant::now();
+
         frame = func(frame);
+
+        let timing_frame = now.elapsed();
 
         let data = frame.data;
         let t = data.iter().map(|x| *x);
 
         let rect = Rectangle::new(Point::zero(), frame_size);
 
+        let timing_prepare = now.elapsed();
+
         self.display.fill_contiguous(&rect, t).unwrap();
+
+        let timing_render = now.elapsed();
+
+        info!(
+            "display timing: frame {} prepare {} render {}",
+            timing_frame, timing_prepare, timing_render
+        );
     }
 }
 

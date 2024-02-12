@@ -1,5 +1,6 @@
 pub mod calendar;
 pub mod commands;
+pub mod contract;
 pub mod display_interface;
 pub mod domain;
 pub mod error;

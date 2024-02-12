@@ -3,7 +3,7 @@ use time::{OffsetDateTime, UtcOffset};
 
 use crate::calendar::CalendarEventDto;
 
-#[derive(Debug, Deserialize, PartialEq, Clone)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub struct ReferenceTimeOffset {
     pub now: i64,
     pub offset_seconds: i32,

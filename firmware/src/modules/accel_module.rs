@@ -2,11 +2,7 @@ use crate::peripherals::accelerometer::Accelerometer;
 use crate::peripherals::i2c_proxy_async::I2cProxyAsync;
 use esp_idf_hal::i2c::I2cDriver;
 use log::{error, info};
-use std::sync::Arc;
 use tokio::sync::broadcast::{Receiver, Sender};
-use tokio::sync::Notify;
-
-use tokio::time::{sleep, Duration};
 
 use blinky_shared::commands::Commands;
 use blinky_shared::events::Events;
@@ -22,7 +18,7 @@ impl AccelerometerModule {
     ) {
         let recv_cmd = commands.subscribe();
 
-        let mut accel_init_res = Accelerometer::create(proxy, proxy_ex).await;
+        let accel_init_res = Accelerometer::create(proxy, proxy_ex).await;
 
         match accel_init_res {
             Ok(accel) => {
@@ -37,22 +33,17 @@ impl AccelerometerModule {
         info!("done.")
     }
     async fn proceed(
-        accel: Accelerometer<'static>,
+        mut accel: Accelerometer<'static>,
         mut commands: Receiver<Commands>,
         events: Sender<Events>,
     ) {
         let mut recv_event = events.subscribe();
 
-        let start_read = Arc::new(Notify::new());
-
         let mut thermometer = accel.get_thermometer();
-
-        let accel_job = tokio::spawn(Self::read_interrupt_status(accel, start_read.clone()));
 
         loop {
             tokio::select! {
                 Ok(command) = commands.recv() => {
-                    info!("{:?}", command);
                     match command {
                         Commands::StartDeepSleep => {
                             break;
@@ -65,31 +56,21 @@ impl AccelerometerModule {
                     }
                 },
                 Ok(event) = recv_event.recv() => {
-                    info!("{:?}", event);
                     match event {
                         Events::TouchOrMove => {
-                            start_read.notify_one();
+                            Self::read_interrupt_status(&mut accel).await;
                         }
-                        Events::Wakeup(cause) => {
+                        Events::Wakeup(_) => {
                         }
                         _ => {}
                     }
                 },
             }
         }
-
-        accel_job.abort();
     }
 
-    async fn read_interrupt_status<'a>(accel: Accelerometer<'a>, start_reading: Arc<Notify>) {
-        let mut accel_mut = accel;
-        loop {
-            start_reading.notified().await;
-            info!("reading interrupt...");
-            while accel_mut.read_interrupt_status() != 0 {
-                sleep(Duration::from_millis(100)).await;
-            }
-            info!("no interrupt");
-        }
+    async fn read_interrupt_status<'a>(accel: &mut Accelerometer<'a>) {
+        let interrupt_status = accel.read_interrupt_status();
+        info!("accel interrupt status = {:?}", interrupt_status);
     }
 }

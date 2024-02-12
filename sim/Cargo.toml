@@ -10,9 +10,11 @@ opt-level = "z"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+log = "0.4.20"
+env_logger = "0.11.1"
 embedded-graphics = "0.8.1"
 embedded-graphics-simulator = "0.6.0"
-tokio = { version = "1.34.0", features = ["rt-multi-thread", "sync", "time", "macros"] }
+tokio = { version = "1.36.0", features = ["rt-multi-thread", "sync", "time", "macros"] }
 embedded-graphics-framebuf = "0.5.0"
 time = { version = "0.3.20", features = ["macros", "serde", "formatting", "local-offset"] }
 

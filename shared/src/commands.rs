@@ -1,5 +1,5 @@
-use time::OffsetDateTime;
 use crate::persistence::{PersistenceUnit, PersistenceUnitKind};
+use time::OffsetDateTime;
 
 #[derive(Clone, Debug)]
 pub enum Commands {
@@ -15,4 +15,5 @@ pub enum Commands {
     GetTemperature,
     Persist(PersistenceUnit),
     Restore(PersistenceUnitKind),
+    SetTimezone(i32),
 }

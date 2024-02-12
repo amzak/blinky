@@ -1,5 +1,10 @@
 use blinky_shared::calendar::{CalendarEvent, CalendarEventDto};
-use log::{error, info};
+use blinky_shared::contract::packets::{
+    ReferenceCalendarEventPacket, ReferenceDataPacket, ReferenceDataPacketType,
+    ReferenceLocationPacket, ReferenceTimePacket,
+};
+use blinky_shared::error::Error;
+use log::{error, info, warn};
 use serde::{Deserialize, Serialize};
 use std::ops::Add;
 use time::{OffsetDateTime, UtcOffset};
@@ -50,25 +55,18 @@ impl ReferenceTimeUtc {
     }
 }
 
-#[derive(Debug, Deserialize, PartialEq, Clone)]
-pub struct ReferenceData {
-    pub version: i32,
-    pub reference_time: ReferenceTimeOffset,
-    pub coordinates: GpsCoordinates,
-    pub events: Vec<CalendarEventDto>,
-}
-
 impl ReferenceTime {
     pub async fn start(commands: Sender<Commands>, events: Sender<Events>) {
         let mut recv_cmd = commands.subscribe();
         let mut recv_event = events.subscribe();
+
+        let mut now_opt: Option<OffsetDateTime> = None;
 
         loop {
             tokio::select! {
                 Ok(command) = recv_cmd.recv() => {
                     match command {
                         Commands::GetReferenceTime => {
-                            info!("{:?}", command);
                             commands.send(Commands::RequestReferenceData).unwrap();
                         }
                         Commands::StartDeepSleep => {
@@ -86,29 +84,31 @@ impl ReferenceTime {
                                 continue;
                             }
 
-                            let reference_data: ReferenceData  = deserialize_result.unwrap();
+                            let reference_data: ReferenceDataPacket  = deserialize_result.unwrap();
 
                             info!("{:?}", reference_data);
 
-                            let ReferenceData {reference_time, events: calendar_events_dtos, ..} = reference_data;
+                            match reference_data.packet_type {
+                                ReferenceDataPacketType::Time =>  {
+                                    let now_result = Self::handle_reference_time(&events, reference_data.packet_payload);
+                                    if let Err(error) = now_result {
+                                        error!("{}", error);
+                                        continue;
+                                    }
 
-                            let offset = Duration::from_secs(reference_time.offset_seconds as u64);
+                                    now_opt = Some(now_result.unwrap());
+                                },
+                                ReferenceDataPacketType::Location => {
+                                    Self::handle_reference_location(&events, reference_data.packet_payload);
+                                },
+                                ReferenceDataPacketType::CalendarEvent => {
+                                    if now_opt.is_none() {
+                                        warn!("calendar event skipped");
+                                    }
 
-                            let offset_from_utc = UtcOffset::from_whole_seconds(reference_time.offset_seconds).unwrap();
-
-                            let now = OffsetDateTime::from_unix_timestamp(reference_time.now)
-                                .unwrap()
-                                .add(offset)
-                                .replace_offset(offset_from_utc);
-
-                            events.send(Events::ReferenceTime(now)).unwrap();
-
-                            let calendar_events = calendar_events_dtos.into_iter().map(|x| CalendarEvent::new(x, offset_from_utc));
-
-                            events.send(Events::ReferenceCalendarEventsCount(calendar_events.len() as i32)).unwrap();
-
-                            for event in calendar_events {
-                                events.send(Events::ReferenceCalendarEvent(event)).unwrap();
+                                    let offset_seconds = now_opt.unwrap().offset();
+                                    Self::handle_reference_calendar_event(&events, reference_data.packet_payload, offset_seconds);
+                                },
                             }
                         }
                         _ => {}
@@ -118,5 +118,58 @@ impl ReferenceTime {
         }
 
         info!("done.");
+    }
+
+    fn handle_reference_time(
+        events: &Sender<Events>,
+        data: &[u8],
+    ) -> Result<OffsetDateTime, Error> {
+        let deserialize_result = rmp_serde::from_slice(data);
+        if let Err(err) = deserialize_result {
+            return Err(Error::from(err.to_string().as_str()));
+        }
+
+        let reference_time: ReferenceTimePacket = deserialize_result.unwrap();
+
+        let time = reference_time.time;
+
+        let offset = Duration::from_secs(time.offset_seconds as u64);
+
+        let offset_from_utc = UtcOffset::from_whole_seconds(time.offset_seconds).unwrap();
+
+        let now = OffsetDateTime::from_unix_timestamp(time.now)
+            .unwrap()
+            .add(offset)
+            .replace_offset(offset_from_utc);
+
+        events.send(Events::ReferenceTime(now)).unwrap();
+
+        return Ok(now);
+    }
+
+    fn handle_reference_location(events: &Sender<Events>, data: &[u8]) {
+        let deserialize_result = rmp_serde::from_slice(data);
+        if let Err(err) = deserialize_result {
+            error!("{}", err);
+            return;
+        }
+
+        let reference_location: ReferenceLocationPacket = deserialize_result.unwrap();
+    }
+
+    fn handle_reference_calendar_event(events: &Sender<Events>, data: &[u8], offset: UtcOffset) {
+        let deserialize_result = rmp_serde::from_slice(data);
+        if let Err(err) = deserialize_result {
+            error!("{}", err);
+            return;
+        }
+
+        let reference_calendar_event: ReferenceCalendarEventPacket = deserialize_result.unwrap();
+
+        let calendar_event = CalendarEvent::new(reference_calendar_event.calendar_event, offset);
+
+        events
+            .send(Events::ReferenceCalendarEvent(calendar_event))
+            .unwrap();
     }
 }

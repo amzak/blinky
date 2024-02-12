@@ -22,18 +22,10 @@ use blinky_shared::events::Events;
 
 pub struct PowerModule {}
 
-#[repr(u8)]
-pub enum PowerMode {
-    On,
-    ScreenOff,
-    LightSleep,
-    DeepSleep,
-}
-
 impl PowerModule {
-    const TILL_SCREEN_OFF_SEC: u64 = 4;
+    const TILL_SCREEN_OFF_SEC: u64 = 5;
     const TILL_DEEP_SLEEP_SEC: u64 = 30;
-    const TILL_LIGHT_SLEEP_SEC: u64 = 5;
+    const TILL_LIGHT_SLEEP_SEC: u64 = 10;
 
     pub async fn start(
         adc: ADC1,
@@ -45,10 +37,10 @@ impl PowerModule {
         let mut recv_cmd = commands.subscribe();
         let mut recv_event = events.subscribe();
 
-        let wakeup_cause = Self::get_wakeup_cause();
+        let wakeup_cause = Self::get_wakeup_cause().await;
         info!("startup wakeup cause {:?}", wakeup_cause);
 
-        let mut backlight = Self::init_backlight(config.backlight);
+        let backlight = Self::init_backlight(config.backlight);
 
         let mut adc_device = AdcDevice::new(adc, gpio36);
         let adc_value = adc_device.read();
@@ -66,20 +58,18 @@ impl PowerModule {
 
         let reset_idle = Arc::new(Notify::new());
 
-        let idle_scenario = tokio::spawn(Self::idle_sequence(ev1, cm1, reset_idle.clone()));
+        let idle_scenario =
+            tokio::spawn(Self::idle_sequence(ev1, cm1, backlight, reset_idle.clone()));
 
         events.send(Events::Wakeup(wakeup_cause)).unwrap();
 
         loop {
             select! {
                 Ok(command) = recv_cmd.recv() => {
-                    info!("{:?}", command);
                     match command {
                         Commands::PauseRendering => {
-                            backlight.off();
                         }
                         Commands::ResumeRendering => {
-                            backlight.on();
                             reset_idle.notify_one();
                         }
                         Commands::StartDeepSleep => {
@@ -89,7 +79,6 @@ impl PowerModule {
                     }
                 },
                 Ok(event) = recv_event.recv() => {
-                    info!("{:?}", event);
                     match event {
                         Events::Wakeup(_) => {
                             commands.send(Commands::ResumeRendering).unwrap();
@@ -108,11 +97,17 @@ impl PowerModule {
         info!("done.");
     }
 
-    async fn idle_sequence(events: Sender<Events>, commands: Sender<Commands>, token: Arc<Notify>) {
+    async fn idle_sequence(
+        events: Sender<Events>,
+        commands: Sender<Commands>,
+        mut backlight: Backlight<'_>,
+        token: Arc<Notify>,
+    ) {
         info!("idle_sequence");
 
         loop {
             info!("started idle sequence...");
+            backlight.on();
 
             if !(Self::try_await_for(Self::TILL_SCREEN_OFF_SEC, &token).await) {
                 info!("abort idle sequence on TILL_SCREEN_OFF_SEC");
@@ -120,14 +115,16 @@ impl PowerModule {
             }
 
             commands.send(Commands::PauseRendering).unwrap();
+            backlight.off();
 
             if !(Self::try_await_for(Self::TILL_LIGHT_SLEEP_SEC, &token).await) {
                 info!("abort idle sequence on TILL_LIGHT_SLEEP_SEC");
+                backlight.on();
                 continue;
             }
 
             Self::goto_light_sleep();
-            let wakeup_cause = Self::get_wakeup_cause();
+            let wakeup_cause = Self::get_wakeup_cause().await;
 
             info!("after light sleep, wakeup_cause {:?}", wakeup_cause);
 
@@ -137,6 +134,7 @@ impl PowerModule {
             }
 
             events.send(Events::Wakeup(wakeup_cause)).unwrap();
+            backlight.on();
         }
     }
 
@@ -151,8 +149,8 @@ impl PowerModule {
         Backlight::create(backlight_pin)
     }
 
-    fn get_wakeup_cause() -> WakeupCause {
-        let esp_cause = Self::get_wakeup_cause_esp();
+    async fn get_wakeup_cause() -> WakeupCause {
+        let esp_cause = Self::get_wakeup_cause_esp().await;
         let cause = match esp_cause {
             esp_sleep_source_t_ESP_SLEEP_WAKEUP_EXT0 => WakeupCause::Ext0,
             esp_sleep_source_t_ESP_SLEEP_WAKEUP_EXT1 => WakeupCause::Ext1,
@@ -164,18 +162,20 @@ impl PowerModule {
         return cause;
     }
 
-    fn get_wakeup_cause_esp() -> esp_sleep_wakeup_cause_t {
-        let mut cause = esp_sleep_source_t_ESP_SLEEP_WAKEUP_UNDEFINED;
-        unsafe {
-            cause = esp_idf_sys::esp_sleep_get_wakeup_cause();
+    async fn get_wakeup_cause_esp() -> esp_sleep_wakeup_cause_t {
+        let result = tokio::task::spawn_blocking(|| unsafe {
+            let cause = esp_idf_sys::esp_sleep_get_wakeup_cause();
 
             let ext1 = esp_idf_sys::esp_sleep_get_ext1_wakeup_status();
             let touch = esp_idf_sys::esp_sleep_get_touchpad_wakeup_status();
 
             info!("wakeup debug, ext1 {:?} touch {:?}", ext1, touch);
-        }
 
-        return cause;
+            cause
+        })
+        .await;
+
+        return result.unwrap();
     }
 
     fn setup_wakeup_sources() {
@@ -228,12 +228,12 @@ impl PowerModule {
         pin_driver.get_level() == Level::Low
     }
 
-    const adc_min: u16 = 1600;
-    const adc_max: u16 = 2050;
+    const ADC_MIN: u16 = 1600;
+    const ADC_MAX: u16 = 2050;
 
     fn convert_to_percent(adc_level: u16) -> u16 {
         let percent: u32 =
-            100 * ((adc_level - Self::adc_min) as u32) / (Self::adc_max - Self::adc_min) as u32;
+            100 * ((adc_level - Self::ADC_MIN) as u32) / (Self::ADC_MAX - Self::ADC_MIN) as u32;
 
         if percent > 100 {
             return 100;

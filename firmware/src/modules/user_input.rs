@@ -2,7 +2,6 @@ use esp_idf_hal::gpio::{AnyIOPin, Input, PinDriver};
 use esp_idf_sys::EspError;
 use log::info;
 use tokio::sync::broadcast::Sender;
-use tokio::time::{sleep, Duration};
 
 use blinky_shared::commands::Commands;
 use blinky_shared::events::Events;
@@ -46,7 +45,6 @@ impl UserInput {
         events: Sender<Events>,
     ) -> Result<(), EspError> {
         loop {
-            sleep(Duration::from_millis(100)).await;
             pin.wait_for_falling_edge().await.unwrap();
             events.send(Events::TouchOrMove).unwrap();
         }

@@ -1,6 +1,7 @@
 pub mod accel_module;
 pub mod ble_module;
 pub mod calendar_module;
+pub mod logging_module;
 pub mod module;
 pub mod persister_module;
 pub mod power_module;

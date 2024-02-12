@@ -31,6 +31,7 @@ use modules::time_sync::TimeSync;
 use modules::touch_module::TouchModule;
 use modules::user_input::UserInput;
 
+use crate::modules::logging_module::LoggingModule;
 use crate::peripherals::display::ClockDisplay;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -47,13 +48,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .worker_threads(2)
         .on_thread_start(|| {
             let core = esp_idf_hal::cpu::core();
+
             info!(
-                "thread started {:?} core {:?}",
+                "thread started {:?} {:?} core {:?}",
                 thread::current().id(),
+                thread::current().name(),
                 core
             );
         })
-        .thread_stack_size(30 * 1024)
+        .thread_stack_size(16 * 1024)
         .build()?;
 
     rt.block_on(async { main_async().await })?;
@@ -75,7 +78,14 @@ async fn main_async() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     let (commands_sender, _) = broadcast::channel::<Commands>(32);
-    let (events_sender, _) = broadcast::channel::<Events>(32);
+    let (events_sender, _) = broadcast::channel::<Events>(64);
+
+    let commands_channel = commands_sender.clone();
+    let events_channel = events_sender.clone();
+
+    let logging_task = tokio::spawn(async move {
+        LoggingModule::start(commands_channel, events_channel).await;
+    });
 
     let mut hal = HAL::new(hal_conf, peripherals.i2c0);
 
@@ -187,6 +197,7 @@ async fn main_async() -> Result<(), Box<dyn std::error::Error>> {
     });
 
     join!(
+        logging_task,
         rtc_task,
         time_sync_task,
         ble_task,

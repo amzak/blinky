@@ -1,4 +1,4 @@
-use std::{convert::Infallible, io::Seek};
+use std::convert::Infallible;
 
 use blinky_shared::display_interface::ClockDisplayInterface;
 use embedded_graphics::{

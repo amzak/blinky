@@ -1,10 +1,10 @@
+use bma423::{FeatureInterruptStatus, PowerControlFlag};
 use std::f32;
-use bma423::{FeatureInterruptStatus, PowerConfigurationFlag, PowerControlFlag};
 
 use bitmask_enum::bitmask;
+use embedded_hal::delay::DelayNs;
 use embedded_hal::i2c::I2c;
-use embedded_hal::delay::DelayUs;
-use num_enum::{IntoPrimitive};
+use num_enum::IntoPrimitive;
 
 const BMA423_CONFIG_FILE: [u8; 6144] = [
     0x80, 0x2e, 0x38, 0xb1, 0x80, 0x2e, 0x3a, 0xb1, 0xc8, 0x2e, 0x00, 0x2e, 0x80, 0x2e, 0xff, 0x00,
@@ -394,7 +394,14 @@ const BMA423_CONFIG_FILE: [u8; 6144] = [
 ];
 
 pub struct Bma423Ex<I2C> {
-    i2c: I2C
+    i2c: I2C,
+}
+
+#[bitmask(u8)]
+#[derive(Copy, Clone, Debug, IntoPrimitive)]
+enum PowerConfigurationFlag {
+    AdvancedPowerSave = Self(0b0000_0001),
+    FifoSelfWakeUp = Self(0b0000_0010),
 }
 
 #[repr(u8)]
@@ -432,7 +439,7 @@ pub enum InterruptIOCtlFlags {
 #[derive(Debug, Clone, Copy, IntoPrimitive)]
 pub enum InterruptMode {
     NonLatched = Self(0b0000_0000),
-    Latched = Self(0b0000_0001)
+    Latched = Self(0b0000_0001),
 }
 
 #[repr(usize)]
@@ -440,7 +447,7 @@ pub enum InterruptMode {
 pub enum FeatureOffset {
     AnyMotion = 0x00,
     WristTilt = 0x40,
-    AxisRemap = 0x44
+    AxisRemap = 0x44,
 }
 
 const DEFAULT_ADDRESS: u8 = 0x18;
@@ -476,12 +483,9 @@ impl AxesConfig {
     }
 }
 
-impl<I2C: I2c> Bma423Ex<I2C>
-{
+impl<I2C: I2c> Bma423Ex<I2C> {
     pub fn new(i2c: I2C) -> Self {
-        Self {
-            i2c
-        }
+        Self { i2c }
     }
 
     fn write(&mut self, data: &[u8]) -> Result<(), I2C::Error> {
@@ -583,7 +587,7 @@ impl<I2C: I2c> Bma423Ex<I2C>
         return Ok(data[0]);
     }
 
-    pub fn soft_reset(&mut self, delay: &mut impl DelayUs) -> Result<(), I2C::Error> {
+    pub fn soft_reset(&mut self, delay: &mut impl DelayNs) -> Result<(), I2C::Error> {
         let mut data: [u8; 2] = [Reg::Cmd.into(), 0xB6];
         self.write(&mut data)?;
 
@@ -604,7 +608,12 @@ impl<I2C: I2c> Bma423Ex<I2C>
         self.write(&[Reg::InterruptMode.into(), value.into()])
     }
 
-    fn stream_write(&mut self, reg: Reg, data: &[u8], delay: &mut impl DelayUs) -> Result<(), I2C::Error> {
+    fn stream_write(
+        &mut self,
+        reg: Reg,
+        data: &[u8],
+        delay: &mut impl DelayNs,
+    ) -> Result<(), I2C::Error> {
         let inc: usize = READ_WRITE_LEN;
         let mut index: usize = 0;
 
@@ -632,7 +641,7 @@ impl<I2C: I2c> Bma423Ex<I2C>
         Ok(())
     }
 
-    pub fn init(&mut self, delay: &mut impl DelayUs) -> Result<(), I2C::Error> {
+    pub fn init(&mut self, delay: &mut impl DelayNs) -> Result<(), I2C::Error> {
         self.set_power_config(PowerConfigurationFlag::none())?;
 
         delay.delay_us(450);
@@ -667,7 +676,7 @@ impl<I2C: I2c> Bma423Ex<I2C>
         return Ok(tempr_raw as f32 / Self::BMA4_SCALE_TEMP as f32);
     }
 
-    pub fn reset_and_init(&mut self, delay: &mut impl DelayUs) -> Result<(), I2C::Error> {
+    pub fn reset_and_init(&mut self, delay: &mut impl DelayNs) -> Result<(), I2C::Error> {
         self.soft_reset(delay)?;
         self.init(delay)?;
         Ok(())

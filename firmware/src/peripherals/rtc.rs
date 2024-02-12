@@ -1,6 +1,7 @@
 use blinky_shared::error::Error;
 use embedded_hal_compat::{Reverse, ReverseCompat};
 use esp_idf_hal::i2c::{I2cDriver, I2cError};
+use log::info;
 use pcf8563::Error::I2C;
 use pcf8563::{DateTime, PCF8563};
 use time::{Date, Month, PrimitiveDateTime};
@@ -23,6 +24,8 @@ impl<'a> Rtc<'a> {
 
     pub fn get_now_utc(&mut self) -> PrimitiveDateTime {
         let datetime_rtc = self.rtc.get_datetime().unwrap();
+
+        info!("now from rtc {:?}", datetime_rtc);
 
         let datetime = Date::from_calendar_date(
             datetime_rtc.year as i32 + 2000,

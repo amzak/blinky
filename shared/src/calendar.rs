@@ -5,12 +5,26 @@ use time::{OffsetDateTime, UtcOffset};
 
 use crate::domain::ReferenceTimeUtc;
 
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone, Copy)]
+#[repr(u8)]
+pub enum CalendarEventIcon {
+    Default = 0,
+    Meeting = 1,
+    Birthday = 2,
+    Trip = 3,
+    Bus = 4,
+    Train = 5,
+    Car = 6,
+}
+
 #[derive(Clone, Debug)]
 pub struct CalendarEvent {
     pub id: i64,
     pub title: String,
     pub start: OffsetDateTime,
     pub end: OffsetDateTime,
+    pub icon: CalendarEventIcon,
+    pub color: u32,
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
@@ -19,6 +33,8 @@ pub struct CalendarEventDto {
     pub title: String,
     pub start: ReferenceTimeUtc,
     pub end: ReferenceTimeUtc,
+    pub icon: CalendarEventIcon,
+    pub color: u32,
 }
 
 impl From<CalendarEvent> for CalendarEventDto {
@@ -28,6 +44,8 @@ impl From<CalendarEvent> for CalendarEventDto {
             title: value.title,
             start: value.start.into(),
             end: value.end.into(),
+            icon: value.icon,
+            color: value.color,
         }
     }
 }
@@ -45,6 +63,8 @@ impl CalendarEvent {
             start: dto.start.to_offset_dt(tz),
             end: dto.end.to_offset_dt(tz),
             title: dto.title,
+            icon: dto.icon,
+            color: dto.color,
         }
     }
 }
@@ -56,6 +76,8 @@ impl From<CalendarEventDto> for CalendarEvent {
             start: dto.start.into(),
             end: dto.end.into(),
             title: dto.title,
+            icon: dto.icon,
+            color: dto.color,
         }
     }
 }
