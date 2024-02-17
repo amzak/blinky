@@ -1,44 +1,39 @@
-use blinky_shared::{commands::Commands, events::Events};
+use std::future::Future;
+
+use blinky_shared::{commands::Commands, events::Events, message_bus::BusSender};
 use log::{error, info};
-use tokio::sync::broadcast::Sender;
+
+use blinky_shared::message_bus::{BusHandler, ContextStub, MessageBus};
 
 pub struct LoggingModule();
 
-impl LoggingModule {
-    pub async fn start(commands: Sender<Commands>, events: Sender<Events>) {
-        let mut recv_cmd = commands.subscribe();
-        let mut recv_event = events.subscribe();
-
-        loop {
-            tokio::select! {
-                 Ok(command) = recv_cmd.recv() => {
-                     info!("{:?}", command);
-                     match command {
-                        Commands::StartDeepSleep => {
-                            break;
-                        }
-                        _ => {}
-                    }
-                 }
-                 Ok(event) = recv_event.recv() => {
-
-                     match event {
-                        Events::Restored(unit) => {
-                            match unit.data {
-                                Ok(buf) => {
-                                    info!("Restored {} of {} bytes", unit.kind.as_ref(), buf.len());
-                                },
-                                Err(err) => {
-                                    error!("Failed to restore {} error: {}", unit.kind.as_ref(), err);
-                                }
-                            }
-                        }
-                         _ => {
-                            info!("{:?}", event);
-                        }
-                     }
-                 }
+impl BusHandler<ContextStub> for LoggingModule {
+    async fn event_handler(_bus: &BusSender, _context: &mut ContextStub, event: Events) {
+        match event {
+            Events::Restored(unit) => match unit.data {
+                Ok(buf) => {
+                    info!("Restored {} of {} bytes", unit.kind.as_ref(), buf.len());
+                }
+                Err(err) => {
+                    error!("Failed to restore {} error: {}", unit.kind.as_ref(), err);
+                }
+            },
+            _ => {
+                info!("{:?}", event);
             }
         }
+    }
+
+    async fn command_handler(_bus: &BusSender, _context: &mut ContextStub, command: Commands) {
+        info!("{:?}", command);
+    }
+}
+
+impl LoggingModule {
+    pub fn start(bus: MessageBus) -> impl Future<Output = ()> {
+        info!("starting...");
+        let context = ContextStub {};
+
+        MessageBus::handle::<ContextStub, Self>(bus, context)
     }
 }

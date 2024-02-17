@@ -1,8 +1,7 @@
 use embedded_graphics::pixelcolor::raw::RawU16;
 use time::Instant;
 use time::{Duration, OffsetDateTime, Time};
-use tokio::runtime::{Builder, Handle};
-use tokio::sync::broadcast::Sender;
+use tokio::runtime::Handle;
 
 use time::macros::format_description;
 
@@ -10,19 +9,20 @@ use log::{debug, info};
 
 use embedded_icon::mdi::size18px::*;
 use embedded_icon::prelude::*;
-use tokio::sync::mpsc::{channel, Receiver};
+use tokio::sync::mpsc::{channel, Receiver, Sender};
 
 use crate::calendar::CalendarEvent;
 use crate::calendar::CalendarEventIcon;
 use crate::commands::Commands;
 use crate::display_interface::ClockDisplayInterface;
 use crate::events::Events;
+use crate::message_bus::{BusHandler, BusSender, MessageBus};
 use embedded_graphics::primitives::{PrimitiveStyle, StyledDrawable};
 use embedded_graphics::{mono_font::MonoTextStyle, prelude::*, primitives};
 use std::collections::HashSet;
+use std::f32::consts::PI;
 use std::marker::PhantomData;
 use std::ops::Add;
-use std::thread;
 use u8g2_fonts::{fonts, U8g2TextStyle};
 
 use super::graphics::Graphics;
@@ -33,63 +33,70 @@ pub struct Renderer<TDisplay> {
     _inner: PhantomData<TDisplay>,
 }
 
+struct Context {
+    tx: Sender<Events>,
+    pause: bool,
+}
+
 pub struct ViewModel {
     is_charging: Option<bool>,
     battery_level: Option<u16>,
-    sync_status: Option<bool>,
+    ble_connected: Option<bool>,
     temperature: Option<f32>,
     time: Option<OffsetDateTime>,
     calendar_events: HashSet<CalendarEvent>,
+
+    force_update_events: bool,
+}
+
+impl<TDisplay> BusHandler<Context> for Renderer<TDisplay> {
+    async fn event_handler(_bus: &BusSender, context: &mut Context, event: Events) {
+        if context.pause {
+            return;
+        }
+
+        context.tx.send(event).await.unwrap();
+    }
+
+    async fn command_handler(_bus: &BusSender, context: &mut Context, command: Commands) {
+        match command {
+            Commands::PauseRendering => {
+                context.pause = true;
+            }
+            Commands::ResumeRendering => {
+                context.pause = false;
+            }
+            Commands::StartDeepSleep => {
+                context.tx.send(Events::Term).await.unwrap();
+            }
+            _ => {}
+        }
+    }
 }
 
 impl<TDisplay> Renderer<TDisplay>
 where
     TDisplay: ClockDisplayInterface,
 {
-    pub async fn start(commands: Sender<Commands>, events: Sender<Events>) {
-        let mut recv_cmd = commands.subscribe();
-        let mut recv_event = events.subscribe();
+    pub async fn start(bus: MessageBus) {
+        info!("starting...");
 
-        let mut pause = false;
+        let (tx, rx) = channel::<Events>(16);
 
-        let (tx, rx) = channel::<Events>(32);
+        let context = Context { tx, pause: false };
 
-        let render_loop_task = tokio::task::spawn_blocking(move || {
-            Self::render_loop(rx);
+        let message_bus = bus.clone();
+        let render_loop_task = tokio::task::spawn_blocking(|| {
+            Self::render_loop(message_bus, rx);
         });
 
-        loop {
-            tokio::select! {
-                Ok(command) = recv_cmd.recv() => {
-                    match command {
-                        Commands::PauseRendering => {
-                            pause = true;
-                        }
-                        Commands::ResumeRendering => {
-                            pause = false;
-                        }
-                        Commands::StartDeepSleep => {
-                            tx.send(Events::Term).await.unwrap();
-                            break;
-                        }
-                        _ => {}
-                    }
-                },
-                Ok(event) = recv_event.recv() => {
-                    if pause {
-                        continue;
-                    }
-
-                    tx.send(event).await.unwrap();
-                }
-            }
-        }
+        MessageBus::handle::<Context, Self>(bus, context).await;
 
         info!("waiting for render loop...");
 
         render_loop_task.await.unwrap();
 
-        info!("done");
+        info!("done.");
     }
 
     fn render_datetime(frame: &mut TDisplay::FrameBuffer<'_>, vm: &ViewModel) {
@@ -256,56 +263,77 @@ where
         );
     }
 
-    pub fn render_sync_status(frame: &mut TDisplay::FrameBuffer<'_>, vm: &ViewModel) {
-        if vm.sync_status.is_none() {
+    pub fn render_ble_connected(frame: &mut TDisplay::FrameBuffer<'_>, vm: &ViewModel) {
+        if vm.ble_connected.is_none() {
             return;
         }
 
-        let color = if !vm.sync_status.unwrap() {
+        let color = if vm.ble_connected.unwrap() {
             TDisplay::ColorModel::WHITE
         } else {
             TDisplay::ColorModel::BLACK
         };
 
-        let icon = Sync::new(color);
+        let icon = Bluetooth::new(color);
 
-        Graphics::<TDisplay>::icon(frame, Point::new(120 - 18 / 2, 10), &icon);
+        Graphics::<TDisplay>::icon(frame, Point::new(120 - 18 / 2, 15), &icon);
     }
 
-    fn render_loop(mut rx: Receiver<Events>) {
+    fn render_loop(bus: MessageBus, mut rx: Receiver<Events>) {
         let mut display = TDisplay::create();
-
         let mut state: ViewModel = ViewModel {
             battery_level: None,
             is_charging: None,
-            sync_status: None,
+            ble_connected: None,
             temperature: None,
             time: None,
             calendar_events: HashSet::new(),
+            force_update_events: true,
         };
 
-        let handle = Handle::current();
+        let mut full_break = false;
 
         loop {
-            let event_opt = handle.block_on(rx.recv());
+            loop {
+                let event_opt = match rx.try_recv() {
+                    Ok(event) => Some(event),
+                    Err(err) => match err {
+                        tokio::sync::mpsc::error::TryRecvError::Empty => {
+                            Self::render(&mut display, &mut state);
 
-            if event_opt.is_none() {
-                break;
+                            rx.blocking_recv()
+                        }
+                        tokio::sync::mpsc::error::TryRecvError::Disconnected => {
+                            full_break = true;
+                            None
+                        }
+                    },
+                };
+
+                if event_opt.is_none() {
+                    full_break = true;
+                    break;
+                }
+
+                let event = event_opt.unwrap();
+
+                if matches!(event, Events::Term) {
+                    full_break = true;
+                    break;
+                }
+
+                Self::apply_change(event, &mut state);
             }
 
-            let event = event_opt.unwrap();
-
-            if matches!(event, Events::Term) {
+            if full_break {
                 break;
             }
-
-            Self::render_change(&mut display, event, &mut state);
         }
 
         info!("renderer loop done");
     }
 
-    fn render_change(display: &mut TDisplay, event: Events, view_model: &mut ViewModel) {
+    fn apply_change(event: Events, view_model: &mut ViewModel) {
         match event {
             Events::TimeNow(now) => {
                 view_model.time = Some(now);
@@ -319,11 +347,20 @@ where
             Events::Charging(is_charging) => {
                 view_model.is_charging = Some(is_charging);
             }
-            Events::InSync(status) => {
-                view_model.sync_status = Some(status);
+            Events::BluetoothConnected => {
+                view_model.ble_connected = Some(true);
+            }
+            Events::BluetoothDisconnected => {
+                view_model.ble_connected = Some(false);
             }
             Events::CalendarEvent(calendar_event) => {
-                view_model.calendar_events.replace(calendar_event);
+                let old_count = view_model.calendar_events.len();
+                let updated = view_model.calendar_events.replace(calendar_event);
+                let new_count = view_model.calendar_events.len();
+
+                if updated.is_some() || old_count != new_count {
+                    view_model.force_update_events = true;
+                }
             }
             _ => {}
         }
@@ -331,8 +368,6 @@ where
         if let Some(now) = view_model.time {
             view_model.calendar_events.retain(|x| x.end >= now);
         }
-
-        Self::render(display, view_model);
     }
 
     fn render(display: &mut TDisplay, vm: &mut ViewModel) {
@@ -343,7 +378,7 @@ where
 
             let timing_battery = now.elapsed();
 
-            Self::render_sync_status(&mut frame, vm);
+            Self::render_ble_connected(&mut frame, vm);
 
             let timing_sync = now.elapsed();
 
@@ -359,7 +394,7 @@ where
 
             let timing_events = now.elapsed();
 
-            debug!(
+            info!(
                 "rendering timing: battery {} sync {} tmpr {} datetime {} events {}",
                 timing_battery, timing_sync, timing_tmpr, timing_datetime, timing_events
             );
@@ -368,20 +403,20 @@ where
         })
     }
 
-    fn render_events(frame: &mut TDisplay::FrameBuffer<'_>, vm: &ViewModel) {
+    fn render_events(frame: &mut TDisplay::FrameBuffer<'_>, vm: &mut ViewModel) {
         if vm.time.is_none() {
+            return;
+        }
+
+        if !vm.force_update_events {
             return;
         }
 
         let now = vm.time.unwrap();
 
-        let zero_time = Time::from_hms(0, 0, 0).unwrap();
-
-        let today_midnight = now.replace_time(zero_time);
-
         let half_day = Duration::hours(12);
 
-        debug!("rendering {} events...", vm.calendar_events.len());
+        info!("rendering {} events...", vm.calendar_events.len());
 
         for event in vm.calendar_events.iter() {
             if event.end - event.start >= half_day {
@@ -394,6 +429,8 @@ where
 
             Self::render_event(frame, &event, &now);
         }
+
+        vm.force_update_events = false;
     }
 
     fn render_event(
@@ -402,6 +439,7 @@ where
         now_ref: &OffsetDateTime,
     ) {
         let now = *now_ref;
+
         let event_start_rel = if event.start > now {
             event.start - now
         } else {
@@ -416,17 +454,17 @@ where
             event.end - now
         };
 
-        let start_angle = Angle::from_degrees(
-            ((event_start_rel.whole_minutes() as f32 / (12.0 * 60.0)) * 360.0) % 360.0,
+        let start_angle = Angle::from_radians(
+            (event_start_rel.whole_minutes() as f32 / half_a_day.whole_minutes() as f32) * PI * 2.0,
         );
 
-        let end_angle = Angle::from_degrees(
-            ((event_end_rel.whole_minutes() as f32 / (12.0 * 60.0)) * 360.0) % 360.0,
+        let end_angle = Angle::from_radians(
+            (event_end_rel.whole_minutes() as f32 / half_a_day.whole_minutes() as f32) * PI * 2.0,
         );
 
         debug!(
-            "event {} - {} {:?} - {:?}",
-            event.start, event.end, start_angle, end_angle
+            "event {} - {} {:?} - {:?} {:?} - {:?}",
+            event.start, event.end, event_start_rel, event_end_rel, start_angle, end_angle
         );
 
         let angle_sweep = if event_start_rel == event_end_rel {
@@ -443,8 +481,8 @@ where
 
         let style = PrimitiveStyle::with_stroke(color, 2);
 
-        let three_quaters = Angle::from_degrees(270.0);
-        let start = start_angle + three_quaters;
+        let three_quaters = Angle::from_degrees(90.0);
+        let start = start_angle - three_quaters;
 
         let top_left = Point::new(2, 2);
 

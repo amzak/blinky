@@ -5,6 +5,7 @@ pub mod display_interface;
 pub mod domain;
 pub mod error;
 pub mod events;
+pub mod message_bus;
 pub mod modules;
 pub mod persistence;
 

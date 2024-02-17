@@ -1,63 +1,58 @@
-use std::thread;
-
 use crate::peripherals::i2c_proxy_async::I2cProxyAsync;
 use esp_idf_hal::i2c::I2cDriver;
 use log::info;
 use time::{PrimitiveDateTime, UtcOffset};
 use tokio::runtime::Handle;
-use tokio::sync::broadcast::Sender;
-use tokio::sync::mpsc::{channel, Receiver};
+use tokio::sync::mpsc::{channel, Receiver, Sender};
 
 use crate::peripherals::rtc::Rtc;
 
 use blinky_shared::commands::Commands;
 use blinky_shared::events::Events;
+use blinky_shared::message_bus::{BusHandler, BusSender, MessageBus};
 
 pub struct RtcModule {}
+
+struct Context {
+    tx: Sender<Commands>,
+}
 
 #[link_section = ".rtc.data"]
 static mut UTC_OFFSET: Option<UtcOffset> = None;
 
-impl RtcModule {
-    pub async fn start(
-        proxy: I2cProxyAsync<I2cDriver<'static>>,
-        commands: Sender<Commands>,
-        events: Sender<Events>,
-    ) {
-        let mut recv_cmd = commands.subscribe();
+impl BusHandler<Context> for RtcModule {
+    async fn event_handler(bus: &BusSender, context: &mut Context, event: Events) {}
 
-        let (tx, rx) = channel::<Commands>(10);
-
-        let rtc_task = tokio::task::Builder::new()
-            .name("rtc loop")
-            .spawn_blocking(move || {
-                Self::rtc_loop(events, rx, proxy);
-            })
-            .unwrap();
-
-        loop {
-            tokio::select! {
-                Ok(command) = recv_cmd.recv() => {
-                    match command {
-                        Commands::StartDeepSleep => {
-                            tx.send(command).await.unwrap();
-                            break;
-                        }
-                        _ => {
-                            tx.send(command).await.unwrap();
-                        }
-                    }
-                }
+    async fn command_handler(bus: &BusSender, context: &mut Context, command: Commands) {
+        match command {
+            _ => {
+                context.tx.send(command).await.unwrap();
             }
         }
+    }
+}
+
+impl RtcModule {
+    pub async fn start(proxy: I2cProxyAsync<I2cDriver<'static>>, mut bus: MessageBus) {
+        info!("starting...");
+        let (tx, rx) = channel::<Commands>(10);
+
+        let bus_clone = bus.clone();
+        let rtc_task = tokio::task::spawn_blocking(move || {
+            Self::rtc_loop(bus_clone, rx, proxy);
+        });
+
+        let context = Context { tx };
+
+        MessageBus::handle::<Context, Self>(bus, context).await;
 
         rtc_task.await.unwrap();
 
-        info!("done");
+        info!("done.");
     }
 
     fn rtc_loop(
-        events: Sender<Events>,
+        bus: MessageBus,
         mut rx: Receiver<Commands>,
         proxy: I2cProxyAsync<I2cDriver<'static>>,
     ) {
@@ -89,15 +84,7 @@ impl RtcModule {
 
                         let datetime = rtc.get_now_utc().assume_offset(utc_offset);
 
-                        let core = esp_idf_hal::cpu::core();
-                        info!(
-                            "sending TimeNow in thread {:?} core {:?} queue {:?}",
-                            thread::current().id(),
-                            core,
-                            events.len()
-                        );
-
-                        events.send(Events::TimeNow(datetime)).unwrap();
+                        bus.send_event(Events::TimeNow(datetime));
                     }
                     Commands::SetTime(time) => {
                         let offset_utc = time.offset();

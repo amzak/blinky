@@ -13,100 +13,69 @@ use esp_idf_sys::{
 use log::info;
 use std::sync::Arc;
 use tokio::select;
-use tokio::sync::broadcast::Sender;
 use tokio::sync::Notify;
 use tokio::time::Duration;
 
 use blinky_shared::commands::Commands;
 use blinky_shared::events::Events;
+use blinky_shared::message_bus::{BusHandler, BusSender, MessageBus};
 
 pub struct PowerModule {}
+
+struct Context {
+    idle_reset: Arc<Notify>,
+}
+
+impl BusHandler<Context> for PowerModule {
+    async fn event_handler(bus: &BusSender, context: &mut Context, event: Events) {
+        match event {
+            Events::TouchOrMove => {
+                bus.send_cmd(Commands::ResumeRendering);
+                context.idle_reset.notify_one();
+            }
+            Events::CalendarEvent(_) => {}
+            _ => {}
+        }
+    }
+
+    async fn command_handler(bus: &BusSender, context: &mut Context, command: Commands) {}
+}
 
 impl PowerModule {
     const TILL_SCREEN_OFF_SEC: u64 = 5;
     const TILL_DEEP_SLEEP_SEC: u64 = 30;
     const TILL_LIGHT_SLEEP_SEC: u64 = 10;
 
-    pub async fn start(
-        adc: ADC1,
-        gpio36: Gpio36,
-        config: PinConfig,
-        commands: Sender<Commands>,
-        events: Sender<Events>,
-    ) {
-        let mut recv_cmd = commands.subscribe();
-        let mut recv_event = events.subscribe();
+    pub async fn start(adc: ADC1, gpio36: Gpio36, config: PinConfig, bus: MessageBus) {
+        info!("starting...");
 
-        let wakeup_cause = Self::get_wakeup_cause().await;
-        info!("startup wakeup cause {:?}", wakeup_cause);
+        Self::announce_wakeup_cause(&bus).await;
+        Self::announce_battery_level(&bus, adc, gpio36).await;
 
         let backlight = Self::init_backlight(config.backlight);
+        let idle_reset = Arc::new(Notify::new());
 
-        let mut adc_device = AdcDevice::new(adc, gpio36);
-        let adc_value = adc_device.read();
-        info!("adc {:?}", adc_value);
+        let idle_scenario = tokio::spawn(Self::idle_sequence(
+            bus.clone(),
+            backlight,
+            idle_reset.clone(),
+        ));
 
-        events
-            .send(Events::BatteryLevel(Self::convert_to_percent(adc_value)))
-            .unwrap();
+        let context = Context { idle_reset };
 
-        let is_charging = Self::is_charging();
-        events.send(Events::Charging(is_charging)).unwrap();
-
-        let cm1 = commands.clone();
-        let ev1 = events.clone();
-
-        let reset_idle = Arc::new(Notify::new());
-
-        let idle_scenario =
-            tokio::spawn(Self::idle_sequence(ev1, cm1, backlight, reset_idle.clone()));
-
-        events.send(Events::Wakeup(wakeup_cause)).unwrap();
-
-        loop {
-            select! {
-                Ok(command) = recv_cmd.recv() => {
-                    match command {
-                        Commands::PauseRendering => {
-                        }
-                        Commands::ResumeRendering => {
-                            reset_idle.notify_one();
-                        }
-                        Commands::StartDeepSleep => {
-                            break;
-                        }
-                        _ => {}
-                    }
-                },
-                Ok(event) = recv_event.recv() => {
-                    match event {
-                        Events::Wakeup(_) => {
-                            commands.send(Commands::ResumeRendering).unwrap();
-                        }
-                        Events::TouchOrMove => {
-                            commands.send(Commands::ResumeRendering).unwrap();
-                        }
-                        _ => {}
-                    }
-                }
-            }
-        }
+        MessageBus::handle::<Context, Self>(bus, context).await;
 
         idle_scenario.await.unwrap();
 
         info!("done.");
     }
 
-    async fn idle_sequence(
-        events: Sender<Events>,
-        commands: Sender<Commands>,
-        mut backlight: Backlight<'_>,
-        token: Arc<Notify>,
-    ) {
+    async fn idle_sequence(bus: MessageBus, mut backlight: Backlight<'_>, token: Arc<Notify>) {
         info!("idle_sequence");
-
         loop {
             info!("started idle sequence...");
+            bus.send_cmd(Commands::ResumeRendering);
+
             backlight.on();
 
             if !(Self::try_await_for(Self::TILL_SCREEN_OFF_SEC, &token).await) {
@@ -114,7 +83,7 @@ impl PowerModule {
                 continue;
             }
 
-            commands.send(Commands::PauseRendering).unwrap();
+            bus.send_cmd(Commands::PauseRendering);
             backlight.off();
 
             if !(Self::try_await_for(Self::TILL_LIGHT_SLEEP_SEC, &token).await) {
@@ -129,12 +98,11 @@ impl PowerModule {
             info!("after light sleep, wakeup_cause {:?}", wakeup_cause);
 
             if wakeup_cause == WakeupCause::Timer {
-                commands.send(Commands::StartDeepSleep).unwrap();
+                bus.send_cmd(Commands::StartDeepSleep);
                 break;
             }
 
-            events.send(Events::Wakeup(wakeup_cause)).unwrap();
-            backlight.on();
+            bus.send_event(Events::Wakeup(wakeup_cause));
         }
     }
 
@@ -240,5 +208,22 @@ impl PowerModule {
         }
 
         return percent as u16;
+    }
+
+    async fn announce_wakeup_cause(bus: &MessageBus) {
+        let wakeup_cause = Self::get_wakeup_cause().await;
+        info!("startup wakeup cause {:?}", wakeup_cause);
+        bus.send_event(Events::Wakeup(wakeup_cause));
+    }
+
+    async fn announce_battery_level(bus: &MessageBus, adc: ADC1, gpio36: Gpio36) {
+        let mut adc_device = AdcDevice::new(adc, gpio36);
+        let adc_value = adc_device.read();
+        info!("adc {:?}", adc_value);
+
+        bus.send_event(Events::BatteryLevel(Self::convert_to_percent(adc_value)));
+
+        let is_charging = Self::is_charging();
+        bus.send_event(Events::Charging(is_charging));
     }
 }

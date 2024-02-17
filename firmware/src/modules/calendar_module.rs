@@ -4,8 +4,8 @@ use crate::modules::reference_time::ReferenceTimeUtc;
 use log::{error, info, warn};
 use serde::{Deserialize, Serialize};
 use time::{OffsetDateTime, UtcOffset};
-use tokio::sync::broadcast::Sender;
 
+use blinky_shared::message_bus::{BusHandler, BusSender, MessageBus};
 use blinky_shared::{
     calendar::CalendarEvent,
     error::Error,
@@ -13,7 +13,6 @@ use blinky_shared::{
     persistence::{PersistenceUnit, PersistenceUnitKind},
 };
 use blinky_shared::{calendar::CalendarEventDto, commands::Commands};
-
 pub struct CalendarModule {}
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -21,6 +20,12 @@ pub struct CalendarStateDto {
     pub version: i32,
     pub last_sync: ReferenceTimeUtc,
     pub events: Vec<CalendarEventDto>,
+}
+
+struct Context {
+    calendar_events: HashSet<CalendarEvent>,
+    now: Option<OffsetDateTime>,
+    utc_offset: Option<UtcOffset>,
 }
 
 impl CalendarStateDto {
@@ -33,87 +38,96 @@ impl CalendarStateDto {
     }
 }
 
-impl CalendarModule {
-    pub async fn start(commands: Sender<Commands>, events: Sender<Events>) {
-        let mut recv_cmd = commands.subscribe();
-        let mut recv_event = events.subscribe();
-
-        let mut calendar_events: HashSet<CalendarEvent> = HashSet::new();
-
-        let mut now: Option<OffsetDateTime> = None;
-        let mut utc_offset: Option<UtcOffset> = None;
-
-        loop {
-            tokio::select! {
-                Ok(command) = recv_cmd.recv() => {
-                    match command {
-                        Commands::SyncCalendar => {
-                            events.send(Events::InSync(false)).unwrap();
-                        }
-                        Commands::SetTimezone(offset) => {
-                            utc_offset = Some(UtcOffset::from_whole_seconds(offset).unwrap());
-                            commands
-                                .send(Commands::Restore(PersistenceUnitKind::CalendarSyncInfo))
-                                .unwrap();
-                        }
-                        Commands::StartDeepSleep => {
-                            break;
-                        }
-                        _ => {}
-                    }
-                },
-                Ok(event) = recv_event.recv() => {
-                    match event {
-                        Events::TimeNow(time_now) => {
-                            now = Some(time_now);
-                        }
-                        Events::ReferenceCalendarEvent(reference_calendar_event) => {
-                            let replaced = calendar_events.replace(reference_calendar_event.clone());
-
-                            if replaced.is_some() {
-                                info!("event updated {}", replaced.unwrap().id);
-                            }
-
-                            events.send(Events::CalendarEvent(reference_calendar_event)).unwrap();
-                        }
-                        Events::BluetoothDisconnected => {
-                            if calendar_events.len() == 0 {
-                                continue;
-                            }
-
-                            Self::persist_events(&commands, Vec::from_iter(calendar_events.iter().map(|x| x.clone())), &now);
-
-                            info!("events persisted");
-                        }
-
-                        Events::Restored(unit) => {
-                            if !matches!(unit.kind, PersistenceUnitKind::CalendarSyncInfo) {
-                                continue;
-                            }
-
-                            if let Err(error) = unit.data {
-                                error!("{}", error);
-                                continue;
-                            }
-
-                            if utc_offset.is_none() {
-                                warn!("utc_offset is not set");
-                                continue;
-                            }
-
-                            Self::try_restore(&events, &mut calendar_events, unit, utc_offset.unwrap());
-                        }
-                        _ => {}
-                    }
-                }
+impl BusHandler<Context> for CalendarModule {
+    async fn event_handler(bus: &BusSender, context: &mut Context, event: Events) {
+        match event {
+            Events::TimeNow(time_now) => {
+                context.now = Some(time_now);
             }
+            Events::ReferenceCalendarEvent(reference_calendar_event) => {
+                let replaced = context
+                    .calendar_events
+                    .replace(reference_calendar_event.clone());
+
+                if replaced.is_some() {
+                    info!("event updated {}", replaced.unwrap().id);
+                }
+
+                bus.send_event(Events::CalendarEvent(reference_calendar_event));
+            }
+            Events::BluetoothDisconnected => {
+                if context.calendar_events.len() == 0 {
+                    return;
+                }
+
+                Self::persist_events(
+                    bus,
+                    Vec::from_iter(context.calendar_events.iter().map(|x| x.clone())),
+                    &context.now,
+                )
+                .await;
+
+                info!("events persisted");
+            }
+
+            Events::Restored(unit) => {
+                if !matches!(unit.kind, PersistenceUnitKind::CalendarSyncInfo) {
+                    return;
+                }
+
+                if let Err(error) = unit.data {
+                    error!("{}", error);
+                    return;
+                }
+
+                if context.utc_offset.is_none() {
+                    warn!("utc_offset is not set");
+                    return;
+                }
+
+                Self::try_restore(
+                    bus,
+                    &mut context.calendar_events,
+                    unit,
+                    context.utc_offset.unwrap(),
+                )
+                .await;
+            }
+            _ => {}
         }
+    }
+
+    async fn command_handler(bus: &BusSender, context: &mut Context, command: Commands) {
+        match command {
+            Commands::SyncCalendar => {
+                bus.send_event(Events::InSync(false));
+            }
+            Commands::SetTimezone(offset) => {
+                context.utc_offset = Some(UtcOffset::from_whole_seconds(offset).unwrap());
+                bus.send_cmd(Commands::Restore(PersistenceUnitKind::CalendarSyncInfo));
+            }
+            _ => {}
+        }
+    }
+}
+
+impl CalendarModule {
+    pub async fn start(mut bus: MessageBus) {
+        info!("starting...");
+
+        let context = Context {
+            calendar_events: HashSet::new(),
+            now: None,
+            utc_offset: None,
+        };
+
+        MessageBus::handle::<Context, Self>(bus, context).await;
 
         info!("done.");
     }
 
-    fn try_restore(
-        events: &Sender<Events>,
+    async fn try_restore(
+        bus: &BusSender,
         calendar_events: &mut HashSet<CalendarEvent>,
         posponed_restore: PersistenceUnit,
         utc_offset: UtcOffset,
@@ -134,7 +148,7 @@ impl CalendarModule {
 
                 for event in calendar_events_restored {
                     calendar_events.insert(event.clone());
-                    events.send(Events::CalendarEvent(event)).unwrap();
+                    bus.send_event(Events::CalendarEvent(event));
                 }
             }
             Err(error) => {
@@ -146,8 +160,8 @@ impl CalendarModule {
         return true;
     }
 
-    fn persist_events(
-        commands: &Sender<Commands>,
+    async fn persist_events(
+        commands: &BusSender,
         mut calendar_events: Vec<CalendarEvent>,
         now: &Option<OffsetDateTime>,
     ) {
@@ -164,6 +178,6 @@ impl CalendarModule {
         let persistence_unit =
             PersistenceUnit::new(PersistenceUnitKind::CalendarSyncInfo, &calendar_state_dto);
 
-        commands.send(Commands::Persist(persistence_unit)).unwrap();
+        commands.send_cmd(Commands::Persist(persistence_unit));
     }
 }

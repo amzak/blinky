@@ -16,4 +16,5 @@ pub enum Commands {
     Persist(PersistenceUnit),
     Restore(PersistenceUnitKind),
     SetTimezone(i32),
+    AbortSleep,
 }

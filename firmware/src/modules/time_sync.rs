@@ -2,14 +2,21 @@ use blinky_shared::persistence::{PersistenceUnit, PersistenceUnitKind};
 use log::{debug, error, info};
 use time::{Duration, OffsetDateTime, UtcOffset};
 use tokio::select;
-use tokio::sync::broadcast::Sender;
-use tokio::sync::watch;
+use tokio::sync::watch::{self, Sender};
 use tokio::time::MissedTickBehavior;
 
 use blinky_shared::commands::Commands;
 use blinky_shared::events::Events;
 
+use blinky_shared::message_bus::{BusHandler, BusSender, MessageBus};
+
 pub struct TimeSync {}
+
+struct Context {
+    now: Option<OffsetDateTime>,
+    sync_info: Option<RtcSyncInfo>,
+    tx: Sender<bool>,
+}
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Default, Hash)]
 pub struct RtcSyncInfo {
@@ -29,106 +36,104 @@ impl Into<OffsetDateTime> for &RtcSyncInfo {
 
 const SYNC_INTERVAL_MINUTES: i8 = 10;
 
-impl TimeSync {
-    pub async fn start(commands: Sender<Commands>, events: Sender<Events>) {
-        debug!("time_sync module start...");
+impl BusHandler<Context> for TimeSync {
+    async fn event_handler(bus: &BusSender, context: &mut Context, event: Events) {
+        match event {
+            Events::TimeNow(time) => {
+                if context.now.is_some() {
+                    return;
+                }
 
-        let mut recv_cmd = commands.subscribe();
-        let mut recv_event = events.subscribe();
+                context.now = Some(time);
 
-        let cm1 = commands.clone();
-        let (tx, rx) = watch::channel(true);
+                if Self::is_sync_required(&context.now, &context.sync_info) {
+                    bus.send_cmd(Commands::GetReferenceTime);
+                }
+            }
+            Events::ReferenceTime(now) => {
+                bus.send_cmd(Commands::SetTime(now));
 
-        let timer = tokio::spawn(Self::run_timer(rx, cm1));
+                let rtc_sync_info = RtcSyncInfo {
+                    in_sync: true,
+                    last_sync: now.unix_timestamp(),
+                    offset: now.offset().whole_seconds(),
+                };
 
-        let mut now: Option<OffsetDateTime> = None;
-        let mut sync_info: Option<RtcSyncInfo> = None;
+                let unit = PersistenceUnit::new(PersistenceUnitKind::RtcSyncInfo, &rtc_sync_info);
+                bus.send_cmd(Commands::Persist(unit));
+            }
+            Events::Restored(unit) => {
+                if !matches!(unit.kind, PersistenceUnitKind::RtcSyncInfo) {
+                    return;
+                }
 
-        loop {
-            select! {
-                Ok(command) = recv_cmd.recv() => {
-                    match command {
-                        Commands::SyncRtc => {
-                            commands
-                                .send(Commands::Restore(PersistenceUnitKind::RtcSyncInfo))
-                                .unwrap();
+                if let Err(error) = unit.data {
+                    error!("{}", error);
+                    bus.send_cmd(Commands::GetReferenceTime);
+                    return;
+                }
+
+                let res = unit.deserialize();
+
+                match res {
+                    Ok(sync_info_restored) => {
+                        info!("{:?}", sync_info_restored);
+
+                        context.sync_info = Some(sync_info_restored);
+
+                        let utc_offset = context.sync_info.as_ref().unwrap().offset;
+                        bus.send_cmd(Commands::SetTimezone(utc_offset));
+
+                        if Self::is_sync_required(&context.now, &context.sync_info) {
+                            bus.send_cmd(Commands::GetReferenceTime);
                         }
-                        Commands::StartDeepSleep => {
-                            tx.send(true).unwrap();
-                            break;
-                        }
-                        Commands::PauseRendering => {
-                            tx.send(true).unwrap();
-                        }
-                        Commands::ResumeRendering => {
-                            tx.send(false).unwrap();
-                        }
-                        _ => {}
                     }
-                },
-                Ok(event) = recv_event.recv() => {
-                    match event {
-                        Events::TimeNow(time) => {
-                            if now.is_some() {
-                                continue;
-                            }
-
-                            now = Some(time);
-
-                            if Self::is_sync_required(&now, &sync_info) {
-                                commands.send(Commands::GetReferenceTime).unwrap();
-                            }
-                        }
-                        Events::ReferenceTime(now) => {
-                            commands.send(Commands::SetTime(now)).unwrap();
-
-                            let rtc_sync_info = RtcSyncInfo {
-                                in_sync: true,
-                                last_sync: now.unix_timestamp(),
-                                offset: now.offset().whole_seconds()
-                            };
-
-                            let unit = PersistenceUnit::new(PersistenceUnitKind::RtcSyncInfo, &rtc_sync_info);
-                            commands.send(Commands::Persist(unit)).unwrap();
-                        }
-                        Events::Restored(unit) => {
-                            if !matches!(unit.kind, PersistenceUnitKind::RtcSyncInfo) {
-                                continue;
-                            }
-
-                            if let Err(error) = unit.data {
-                                error!("{}", error);
-                                commands.send(Commands::GetReferenceTime).unwrap();
-                                continue;
-                            }
-
-                            let res = unit.deserialize();
-
-                            match res {
-                                Ok(sync_info_restored) => {
-                                    info!("{:?}", sync_info_restored);
-
-                                    sync_info = Some(sync_info_restored);
-
-                                    let utc_offset = sync_info.as_ref().unwrap().offset;
-                                    commands.send(Commands::SetTimezone(utc_offset)).unwrap();
-
-                                    if Self::is_sync_required(&now, &sync_info) {
-                                        commands.send(Commands::GetReferenceTime).unwrap();
-                                    }
-                                },
-                                Err(error) => {
-                                    error!("{:?}", error);
-                                    commands.send(Commands::GetReferenceTime).unwrap();
-                                    continue;
-                                }
-                            }
-                        }
-                        _ => {}
+                    Err(error) => {
+                        error!("{:?}", error);
+                        bus.send_cmd(Commands::GetReferenceTime);
+                        return;
                     }
                 }
             }
+            _ => {}
         }
+    }
+
+    async fn command_handler(bus: &BusSender, context: &mut Context, command: Commands) {
+        match command {
+            Commands::SyncRtc => {
+                bus.send_cmd(Commands::Restore(PersistenceUnitKind::RtcSyncInfo));
+            }
+            Commands::StartDeepSleep => {
+                context.tx.send(true).unwrap();
+                return;
+            }
+            Commands::PauseRendering => {
+                context.tx.send(true).unwrap();
+            }
+            Commands::ResumeRendering => {
+                context.tx.send(false).unwrap();
+            }
+            _ => {}
+        }
+    }
+}
+
+impl TimeSync {
+    pub async fn start(bus: MessageBus) {
+        info!("starting...");
+
+        let (tx, rx) = watch::channel(true);
+
+        let timer = tokio::spawn(Self::run_timer(rx, bus.clone()));
+
+        let context = Context {
+            now: None,
+            sync_info: None,
+            tx,
+        };
+
+        MessageBus::handle::<Context, Self>(bus, context).await;
 
         timer.abort();
 
@@ -147,11 +152,9 @@ impl TimeSync {
         let now = now_opt.unwrap();
         let last_sync: OffsetDateTime = sync_info.into();
 
-        if sync_info.in_sync && Self::is_in_sync(&now, &last_sync) {
-            return false;
-        }
+        let in_sync = sync_info.in_sync && Self::is_in_sync(&now, &last_sync);
 
-        return true;
+        return !in_sync;
     }
 
     fn is_in_sync(now: &OffsetDateTime, last_sync: &OffsetDateTime) -> bool {
@@ -163,7 +166,7 @@ impl TimeSync {
         is_in_sync
     }
 
-    async fn run_timer(pause_param: watch::Receiver<bool>, commands: Sender<Commands>) {
+    async fn run_timer(pause_param: watch::Receiver<bool>, bus: MessageBus) {
         let mut pause = pause_param;
 
         let mut interval = tokio::time::interval(core::time::Duration::from_secs(1));
@@ -188,7 +191,7 @@ impl TimeSync {
                     info!("tick");
 
 
-                    commands.send(Commands::GetTimeNow).unwrap();
+                    bus.send_cmd(Commands::GetTimeNow);
                 }
             }
         }

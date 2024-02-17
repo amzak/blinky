@@ -1,4 +1,4 @@
-use blinky_shared::calendar::{CalendarEvent, CalendarEventDto};
+use blinky_shared::calendar::CalendarEvent;
 use blinky_shared::contract::packets::{
     ReferenceCalendarEventPacket, ReferenceDataPacket, ReferenceDataPacketType,
     ReferenceLocationPacket, ReferenceTimePacket,
@@ -8,13 +8,18 @@ use log::{error, info, warn};
 use serde::{Deserialize, Serialize};
 use std::ops::Add;
 use time::{OffsetDateTime, UtcOffset};
-use tokio::sync::broadcast::Sender;
 use tokio::time::Duration;
 
 use blinky_shared::commands::Commands;
 use blinky_shared::events::Events;
 
+use blinky_shared::message_bus::{BusHandler, BusSender, MessageBus};
+
 pub struct ReferenceTime {}
+
+pub struct Context {
+    now_opt: Option<OffsetDateTime>,
+}
 
 #[derive(Debug, Deserialize, PartialEq, Clone)]
 pub struct GpsCoordinates {
@@ -55,75 +60,76 @@ impl ReferenceTimeUtc {
     }
 }
 
-impl ReferenceTime {
-    pub async fn start(commands: Sender<Commands>, events: Sender<Events>) {
-        let mut recv_cmd = commands.subscribe();
-        let mut recv_event = events.subscribe();
+impl BusHandler<Context> for ReferenceTime {
+    async fn event_handler(bus: &BusSender, context: &mut Context, event: Events) {
+        match event {
+            Events::IncomingData(data) => {
+                let deserialize_result = rmp_serde::from_slice(&data);
+                if let Err(err) = deserialize_result {
+                    error!("{}", err);
+                    return;
+                }
 
-        let mut now_opt: Option<OffsetDateTime> = None;
+                let reference_data: ReferenceDataPacket = deserialize_result.unwrap();
 
-        loop {
-            tokio::select! {
-                Ok(command) = recv_cmd.recv() => {
-                    match command {
-                        Commands::GetReferenceTime => {
-                            commands.send(Commands::RequestReferenceData).unwrap();
+                info!("{:?}", reference_data);
+
+                match reference_data.packet_type {
+                    ReferenceDataPacketType::Time => {
+                        let now_result =
+                            Self::handle_reference_time(bus, reference_data.packet_payload).await;
+
+                        if let Err(error) = now_result {
+                            error!("{}", error);
+                            return;
                         }
-                        Commands::StartDeepSleep => {
-                            break;
-                        }
-                        _ => {}
+
+                        context.now_opt = Some(now_result.unwrap());
                     }
-                },
-                Ok(event) = recv_event.recv() => {
-                    match event {
-                        Events::IncomingData(data) => {
-                            let deserialize_result = rmp_serde::from_slice(&data);
-                            if let Err(err) = deserialize_result {
-                                error!("{}", err);
-                                continue;
-                            }
-
-                            let reference_data: ReferenceDataPacket  = deserialize_result.unwrap();
-
-                            info!("{:?}", reference_data);
-
-                            match reference_data.packet_type {
-                                ReferenceDataPacketType::Time =>  {
-                                    let now_result = Self::handle_reference_time(&events, reference_data.packet_payload);
-                                    if let Err(error) = now_result {
-                                        error!("{}", error);
-                                        continue;
-                                    }
-
-                                    now_opt = Some(now_result.unwrap());
-                                },
-                                ReferenceDataPacketType::Location => {
-                                    Self::handle_reference_location(&events, reference_data.packet_payload);
-                                },
-                                ReferenceDataPacketType::CalendarEvent => {
-                                    if now_opt.is_none() {
-                                        warn!("calendar event skipped");
-                                    }
-
-                                    let offset_seconds = now_opt.unwrap().offset();
-                                    Self::handle_reference_calendar_event(&events, reference_data.packet_payload, offset_seconds);
-                                },
-                            }
+                    ReferenceDataPacketType::Location => {
+                        Self::handle_reference_location(bus, reference_data.packet_payload);
+                    }
+                    ReferenceDataPacketType::CalendarEvent => {
+                        if context.now_opt.is_none() {
+                            warn!("calendar event skipped");
                         }
-                        _ => {}
+
+                        let offset_seconds = context.now_opt.unwrap().offset();
+                        Self::handle_reference_calendar_event(
+                            bus,
+                            reference_data.packet_payload,
+                            offset_seconds,
+                        )
+                        .await;
                     }
                 }
             }
+            _ => {}
         }
+    }
+
+    async fn command_handler(bus: &BusSender, _context: &mut Context, command: Commands) {
+        match command {
+            Commands::GetReferenceTime => {
+                bus.send_cmd(Commands::RequestReferenceData);
+            }
+            _ => {}
+        }
+    }
+}
+
+impl ReferenceTime {
+    pub async fn start(mut bus: MessageBus) {
+        info!("starting...");
+
+        let context = Context { now_opt: None };
+
+        MessageBus::handle::<Context, Self>(bus, context).await;
 
         info!("done.");
     }
 
-    fn handle_reference_time(
-        events: &Sender<Events>,
-        data: &[u8],
-    ) -> Result<OffsetDateTime, Error> {
+    async fn handle_reference_time(bus: &BusSender, data: &[u8]) -> Result<OffsetDateTime, Error> {
         let deserialize_result = rmp_serde::from_slice(data);
         if let Err(err) = deserialize_result {
             return Err(Error::from(err.to_string().as_str()));
@@ -142,12 +148,12 @@ impl ReferenceTime {
             .add(offset)
             .replace_offset(offset_from_utc);
 
-        events.send(Events::ReferenceTime(now)).unwrap();
+        bus.send_event(Events::ReferenceTime(now));
 
         return Ok(now);
     }
 
-    fn handle_reference_location(events: &Sender<Events>, data: &[u8]) {
+    fn handle_reference_location(bus: &BusSender, data: &[u8]) {
         let deserialize_result = rmp_serde::from_slice(data);
         if let Err(err) = deserialize_result {
             error!("{}", err);
@@ -157,7 +163,7 @@ impl ReferenceTime {
         let reference_location: ReferenceLocationPacket = deserialize_result.unwrap();
     }
 
-    fn handle_reference_calendar_event(events: &Sender<Events>, data: &[u8], offset: UtcOffset) {
+    async fn handle_reference_calendar_event(bus: &BusSender, data: &[u8], offset: UtcOffset) {
         let deserialize_result = rmp_serde::from_slice(data);
         if let Err(err) = deserialize_result {
             error!("{}", err);
@@ -168,8 +174,6 @@ impl ReferenceTime {
 
         let calendar_event = CalendarEvent::new(reference_calendar_event.calendar_event, offset);
 
-        events
-            .send(Events::ReferenceCalendarEvent(calendar_event))
-            .unwrap();
+        bus.send_event(Events::ReferenceCalendarEvent(calendar_event));
     }
 }

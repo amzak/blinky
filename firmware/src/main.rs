@@ -1,17 +1,19 @@
 #![feature(slice_as_chunks)]
 #![feature(vec_push_within_capacity)]
-#![feature(async_fn_in_trait)]
 #![feature(associated_type_bounds)]
 
 use blinky_shared::commands::Commands;
-use blinky_shared::events::Events;
+use blinky_shared::message_bus::MessageBus;
 use blinky_shared::modules::renderer::Renderer;
+use esp_idf_hal::i2c::{I2cDriver, I2C0};
 use esp_idf_hal::peripherals::Peripherals;
 use esp_idf_svc::log::{set_target_level, EspLogger};
 use log::*;
+use peripherals::i2c_proxy_async::I2cProxyAsync;
+use std::future::Future;
 use std::thread;
 use tokio::join;
-use tokio::sync::broadcast::{self};
+use tokio::task::JoinHandle;
 
 extern crate blinky_shared;
 
@@ -56,10 +58,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 core
             );
         })
-        .thread_stack_size(16 * 1024)
+        .thread_stack_size(10 * 1024)
         .build()?;
 
-    rt.block_on(async { main_async().await })?;
+    rt.block_on(main_async())?;
 
     PowerModule::goto_deep_sleep();
 
@@ -77,126 +79,55 @@ async fn main_async() -> Result<(), Box<dyn std::error::Error>> {
         touch_reset_pin: 33,
     };
 
-    let (commands_sender, _) = broadcast::channel::<Commands>(32);
-    let (events_sender, _) = broadcast::channel::<Events>(64);
+    let message_bus = MessageBus::new();
 
-    let commands_channel = commands_sender.clone();
-    let events_channel = events_sender.clone();
+    let hal: HAL = HAL::new(hal_conf, peripherals.i2c0);
 
-    let logging_task = tokio::spawn(async move {
-        LoggingModule::start(commands_channel, events_channel).await;
-    });
+    let logging_task = start_logging(&message_bus);
 
-    let mut hal = HAL::new(hal_conf, peripherals.i2c0);
+    let i2c_proxy = hal.get_i2c_proxy_async().clone();
+    let rtc_task = start_rtc(&message_bus, i2c_proxy);
 
-    let i2c_proxy_async = hal.get_i2c_proxy_async().clone();
+    let time_sync_task = start_time_sync(&message_bus);
 
-    let commands_channel = commands_sender.clone();
-    let events_channel = events_sender.clone();
+    let renderer_task = start_renderer(&message_bus);
 
-    let rtc_task = tokio::spawn(async move {
-        RtcModule::start(i2c_proxy_async, commands_channel, events_channel).await;
-    });
-
-    let commands_channel = commands_sender.clone();
-    let events_channel = events_sender.clone();
-
-    let time_sync_task = tokio::spawn(async move {
-        TimeSync::start(commands_channel, events_channel).await;
-    });
-
-    let commands_channel = commands_sender.clone();
-    let events_channel = events_sender.clone();
-
-    let ble_task = tokio::spawn(async move {
-        BleModule::start(commands_channel, events_channel).await;
-    });
-
-    let commands_channel = commands_sender.clone();
-    let events_channel = events_sender.clone();
-
-    let renderer_task = tokio::spawn(async move {
-        Renderer::<ClockDisplay>::start(commands_channel, events_channel).await;
-    });
-
-    let commands_channel = commands_sender.clone();
-    let events_channel = events_sender.clone();
+    let ble_task = start_ble(&message_bus);
 
     let pin_conf = PinConfig { backlight: 21 };
+    let mb = message_bus.clone();
+    let power_task = PowerModule::start(peripherals.adc1, peripherals.pins.gpio36, pin_conf, mb);
 
-    let power_task = tokio::spawn(async move {
-        PowerModule::start(
-            peripherals.adc1,
-            peripherals.pins.gpio36,
-            pin_conf,
-            commands_channel,
-            events_channel,
-        )
-        .await;
-    });
+    let mb = message_bus.clone();
+    let user_input_task = UserInput::start(mb);
 
-    let commands_channel = commands_sender.clone();
-    let events_channel = events_sender.clone();
-
-    let user_input_task = tokio::spawn(async move {
-        UserInput::start(commands_channel, events_channel).await;
-    });
-
-    let commands_channel = commands_sender.clone();
-    let events_channel = events_sender.clone();
-
+    let mb = message_bus.clone();
     let touch_config = hal.get_touch_config();
     let touch_proxy = hal.get_i2c_proxy_async();
-    let touch_task = tokio::spawn(async move {
-        TouchModule::start(touch_config, touch_proxy, commands_channel, events_channel).await;
-    });
-
-    let commands_channel = commands_sender.clone();
-    let events_channel = events_sender.clone();
+    let touch_task = TouchModule::start(touch_config, touch_proxy, mb);
 
     let accel_proxy = hal.get_i2c_proxy_async();
     let accel_proxy_ex = hal.get_i2c_proxy_async();
 
-    let accel_task = tokio::spawn(async move {
-        AccelerometerModule::start(
-            accel_proxy,
-            accel_proxy_ex,
-            commands_channel,
-            events_channel,
-        )
-        .await;
-    });
+    let mb = message_bus.clone();
+    let accel_task = AccelerometerModule::start(accel_proxy, accel_proxy_ex, mb);
 
-    let commands_channel = commands_sender.clone();
-    let events_channel = events_sender.clone();
+    let mb = message_bus.clone();
+    let reference_time_task = ReferenceTime::start(mb);
 
-    let reference_time_task = tokio::spawn(async move {
-        ReferenceTime::start(commands_channel, events_channel).await;
-    });
+    let mb = message_bus.clone();
+    let calendar_task = CalendarModule::start(mb);
 
-    let commands_channel = commands_sender.clone();
-    let events_channel = events_sender.clone();
+    let mb = message_bus.clone();
+    let persister_task = PersisterModule::start(mb);
 
-    let calendar_task = tokio::spawn(async move {
-        CalendarModule::start(commands_channel, events_channel).await;
-    });
+    let startup_sequence = async move {
+        message_bus.send_cmd(Commands::SyncRtc);
+        message_bus.send_cmd(Commands::SyncCalendar);
+        message_bus.send_cmd(Commands::GetTemperature);
+    };
 
-    let commands_channel = commands_sender.clone();
-    let events_channel = events_sender.clone();
-
-    let persister_task = tokio::spawn(async move {
-        PersisterModule::start(commands_channel, events_channel).await;
-    });
-
-    let commands_channel = commands_sender.clone();
-
-    let startup_sequence = tokio::spawn(async move {
-        commands_channel.send(Commands::SyncRtc).unwrap();
-        commands_channel.send(Commands::SyncCalendar).unwrap();
-        commands_channel.send(Commands::GetTemperature).unwrap();
-    });
-
-    join!(
+    let res = join!(
         logging_task,
         rtc_task,
         time_sync_task,
@@ -215,4 +146,33 @@ async fn main_async() -> Result<(), Box<dyn std::error::Error>> {
     info!("done.");
 
     Ok(())
+}
+
+#[inline]
+fn start_logging(mb: &MessageBus) -> impl Future<Output = ()> {
+    let mb = mb.clone();
+    LoggingModule::start(mb)
+}
+
+fn start_time_sync(mb: &MessageBus) -> impl Future<Output = ()> {
+    let mb = mb.clone();
+    TimeSync::start(mb)
+}
+
+fn start_rtc(
+    mb: &MessageBus,
+    i2c_proxy: I2cProxyAsync<I2cDriver<'static>>,
+) -> impl Future<Output = ()> {
+    let mb = mb.clone();
+    RtcModule::start(i2c_proxy, mb)
+}
+
+fn start_ble(mb: &MessageBus) -> impl Future<Output = ()> {
+    let mb = mb.clone();
+    BleModule::start(mb)
+}
+
+fn start_renderer(mb: &MessageBus) -> impl Future<Output = ()> {
+    let mb = mb.clone();
+    Renderer::<ClockDisplay>::start(mb)
 }

@@ -1,9 +1,12 @@
 #![feature(vec_push_within_capacity)]
+#![feature(duration_constructors)]
 
+use std::future::IntoFuture;
 use std::ops::Add;
 
 use blinky_shared::calendar::CalendarEvent;
 use blinky_shared::events::Events;
+use blinky_shared::message_bus::MessageBus;
 use blinky_shared::{commands::Commands, modules::renderer::Renderer};
 use display::SimDisplay;
 use embedded_graphics::{
@@ -18,6 +21,7 @@ use env_logger::{Builder, Target};
 use log::{info, LevelFilter};
 use time::{Date, OffsetDateTime, PrimitiveDateTime, Time, UtcOffset};
 use tokio::join;
+use tokio::runtime::Handle;
 use tokio::sync::broadcast;
 use tokio::time::{sleep, Duration};
 
@@ -34,58 +38,60 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_time()
-        .worker_threads(4)
+        .worker_threads(1)
+        //.thread_stack_size(40 * 1024)
         .build()?;
 
-    rt.block_on(async { main_async().await })?;
+    rt.block_on(main_async())?;
     Ok(())
 }
 
 async fn main_async() -> Result<(), Box<dyn std::error::Error>> {
-    let (commands_sender, _) = broadcast::channel::<Commands>(100);
-    let (events_sender, _) = broadcast::channel::<Events>(100);
+    let remaining_stack = stacker::remaining_stack();
+    info!("remaining_stack {:?}", remaining_stack);
 
-    let commands_renderer = commands_sender.clone();
-    let events_renderer = events_sender.clone();
+    let message_bus = MessageBus::new();
 
-    let renderer_task = tokio::spawn(async move {
-        Renderer::<SimDisplay>::start(commands_renderer, events_renderer).await;
-    });
+    let message_bus_clone = message_bus.clone();
 
-    let commands_input = commands_sender.clone();
+    let renderer_task = Renderer::<SimDisplay>::start(message_bus_clone);
 
+    info!("remaining_stack {:?}", remaining_stack);
+
+    let message_bus_clone = message_bus.clone();
     tokio::task::spawn_blocking(move || {
         let mut input = String::new();
         std::io::stdin().read_line(&mut input).unwrap();
-
-        commands_input.send(Commands::StartDeepSleep).unwrap();
+        message_bus_clone.send_cmd(Commands::StartDeepSleep);
     });
 
-    let startup_sequence = tokio::spawn(async move {
+    let startup_sequence = async move {
+        sleep(Duration::from_millis(1000)).await;
+
         let now_utc = OffsetDateTime::now_utc();
         let date = now_utc.date();
 
-        let mut now = OffsetDateTime::new_utc(date, Time::MIDNIGHT);
+        let mut now = OffsetDateTime::new_utc(date, Time::from_hms(12, 0, 0).unwrap()); //Time::MIDNIGHT);
 
-        let start_time_utc = now + Duration::from_secs(3600 * 11);
+        let event_start_time =
+            OffsetDateTime::new_utc(date, Time::MIDNIGHT) + Duration::from_hours(11);
 
-        let duration = Duration::from_secs(3600 + 1800);
+        let duration = Duration::from_hours(2);
 
-        commands_sender.send(Commands::ResumeRendering).unwrap();
-        events_sender.send(Events::BatteryLevel(80)).unwrap();
-        events_sender.send(Events::InSync(false)).unwrap();
-        events_sender.send(Events::Temperature(20.0)).unwrap();
+        message_bus.send_event(Events::TimeNow(now));
+        message_bus.send_cmd(Commands::ResumeRendering);
+        message_bus.send_event(Events::BatteryLevel(80));
+        message_bus.send_event(Events::BluetoothConnected);
+        message_bus.send_event(Events::Temperature(20.0));
 
-        events_sender
-            .send(Events::CalendarEvent(CalendarEvent {
-                id: 0,
-                start: start_time_utc,
-                end: start_time_utc + duration,
-                title: "qqq".to_string(),
-                icon: blinky_shared::calendar::CalendarEventIcon::Default,
-                color: 0,
-            }))
-            .unwrap();
+        message_bus.send_event(Events::CalendarEvent(CalendarEvent {
+            id: 0,
+            start: event_start_time,
+            end: event_start_time + duration,
+            title: "qqq".to_string(),
+            icon: blinky_shared::calendar::CalendarEventIcon::Default,
+            color: 0,
+        }));
 
         /*
         for i in 1..40 {
@@ -104,14 +110,20 @@ async fn main_async() -> Result<(), Box<dyn std::error::Error>> {
         }
          */
 
+        info!("remaining_stack {:?}", stacker::remaining_stack());
         loop {
-            events_sender.send(Events::TimeNow(now)).unwrap();
-            now = now.add(Duration::from_secs(1));
             sleep(Duration::from_millis(1000)).await;
-        }
-    });
 
-    join!(renderer_task, startup_sequence);
+            message_bus.send_event(Events::TimeNow(now));
+            now = now.add(Duration::from_secs(1));
+        }
+    };
+
+    let startup_sequence_task = tokio::spawn(startup_sequence);
+
+    join!(renderer_task);
+
+    startup_sequence_task.abort();
 
     Ok(())
 }

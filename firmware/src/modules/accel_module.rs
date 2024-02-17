@@ -1,72 +1,65 @@
-use crate::peripherals::accelerometer::Accelerometer;
+use crate::peripherals::accelerometer::{Accelerometer, Thermometer};
 use crate::peripherals::i2c_proxy_async::I2cProxyAsync;
+use blinky_shared::message_bus::{BusHandler, BusSender, MessageBus};
 use esp_idf_hal::i2c::I2cDriver;
 use log::{error, info};
-use tokio::sync::broadcast::{Receiver, Sender};
 
 use blinky_shared::commands::Commands;
 use blinky_shared::events::Events;
 
 pub struct AccelerometerModule {}
 
+struct Context<'a> {
+    accel: Accelerometer<'a>,
+    thermometer: Thermometer<'a>,
+}
+
+impl<'a> BusHandler<Context<'a>> for AccelerometerModule {
+    async fn event_handler(bus: &BusSender, context: &mut Context<'a>, event: Events) {
+        match event {
+            Events::TouchOrMove => {
+                Self::read_interrupt_status(&mut context.accel).await;
+            }
+            _ => {}
+        }
+    }
+
+    async fn command_handler(bus: &BusSender, context: &mut Context<'a>, command: Commands) {
+        match command {
+            Commands::GetTemperature => {
+                let temperature = context.thermometer.read_temperature();
+                bus.send_event(Events::Temperature(temperature));
+            }
+            _ => {}
+        }
+    }
+}
+
 impl AccelerometerModule {
     pub async fn start(
         proxy: I2cProxyAsync<I2cDriver<'static>>,
         proxy_ex: I2cProxyAsync<I2cDriver<'static>>,
-        commands: Sender<Commands>,
-        events: Sender<Events>,
+        mut bus: MessageBus,
     ) {
-        let recv_cmd = commands.subscribe();
+        info!("starting...");
 
-        let accel_init_res = Accelerometer::create(proxy, proxy_ex).await;
+        let accel_init_res = tokio::spawn(Accelerometer::create(proxy, proxy_ex))
+            .await
+            .unwrap();
 
         match accel_init_res {
             Ok(accel) => {
-                Self::proceed(accel, recv_cmd, events).await;
+                let thermometer = accel.get_thermometer();
+                let context = Context { accel, thermometer };
+
+                MessageBus::handle::<Context, Self>(bus, context).await;
             }
             Err(err) => {
                 error!("{}", err);
-                info!("error {}", err);
             }
         }
 
         info!("done.")
-    }
-    async fn proceed(
-        mut accel: Accelerometer<'static>,
-        mut commands: Receiver<Commands>,
-        events: Sender<Events>,
-    ) {
-        let mut recv_event = events.subscribe();
-
-        let mut thermometer = accel.get_thermometer();
-
-        loop {
-            tokio::select! {
-                Ok(command) = commands.recv() => {
-                    match command {
-                        Commands::StartDeepSleep => {
-                            break;
-                        }
-                        Commands::GetTemperature => {
-                            let temperature = thermometer.read_temperature();
-                            events.send(Events::Temperature(temperature)).unwrap();
-                        }
-                        _ => {}
-                    }
-                },
-                Ok(event) = recv_event.recv() => {
-                    match event {
-                        Events::TouchOrMove => {
-                            Self::read_interrupt_status(&mut accel).await;
-                        }
-                        Events::Wakeup(_) => {
-                        }
-                        _ => {}
-                    }
-                },
-            }
-        }
     }
 
     async fn read_interrupt_status<'a>(accel: &mut Accelerometer<'a>) {

@@ -1,13 +1,34 @@
 use esp32_nimble::utilities::BleUuid;
 use esp32_nimble::{uuid128, BLEDevice, NimbleProperties};
 use log::{error, info};
-use std::sync::mpsc::channel;
-use tokio::sync::broadcast::Sender;
+use std::sync::mpsc::{channel, Sender};
+use tokio::runtime::Handle;
 
 use blinky_shared::commands::Commands;
 use blinky_shared::events::Events;
+use blinky_shared::message_bus::{BusHandler, BusSender, MessageBus};
 
 pub struct BleModule {}
+
+struct Context {
+    tx: Sender<Commands>,
+}
+
+impl BusHandler<Context> for BleModule {
+    async fn event_handler(bus: &BusSender, context: &mut Context, event: Events) {}
+
+    async fn command_handler(bus: &BusSender, context: &mut Context, command: Commands) {
+        match command {
+            Commands::RequestReferenceData => {
+                context.tx.send(command).unwrap();
+            }
+            Commands::StartDeepSleep => {
+                context.tx.send(command).unwrap();
+            }
+            _ => {}
+        }
+    }
+}
 
 impl BleModule {
     const DEVICE_NAME: &str = "ESP32-SmartWatchTest-123456";
@@ -19,40 +40,26 @@ impl BleModule {
     const NOTIFYING_CHARACTERISTIC: BleUuid = uuid128!("594429ca-5370-4416-a172-d576986defb3");
     const RW_CHARACTERISTIC: BleUuid = uuid128!("3c9a3f00-8ed3-4bdf-8a39-a01bebede295");
 
-    pub async fn start(commands_channel: Sender<Commands>, events_channel: Sender<Events>) {
-        let mut recv_cmd = commands_channel.subscribe();
+    pub async fn start(bus: MessageBus) {
+        info!("starting...");
 
         let (tx, rx) = channel::<Commands>();
 
-        let ble_task = tokio::task::Builder::new()
-            .name("ble loop")
-            .spawn_blocking(move || {
-                Self::setup_bluetooth(events_channel.clone(), rx);
-            })
-            .unwrap();
-        loop {
-            tokio::select! {
-                Ok(command) = recv_cmd.recv() => {
-                    match command {
-                        Commands::RequestReferenceData => {
-                            tx.send(command).unwrap();
-                        }
-                        Commands::StartDeepSleep => {
-                            tx.send(command).unwrap();
-                            break;
-                        }
-                        _ => {}
-                    }
-                }
-            }
-        }
+        let context = Context { tx };
+
+        let bus_clone = bus.clone();
+        let ble_task = tokio::task::spawn_blocking(move || {
+            Self::setup_bluetooth(bus_clone, rx);
+        });
+
+        MessageBus::handle::<Context, Self>(bus, context).await;
 
         ble_task.await.unwrap();
 
         info!("done.");
     }
 
-    fn setup_bluetooth(events_channel: Sender<Events>, rx: std::sync::mpsc::Receiver<Commands>) {
+    fn setup_bluetooth(bus: MessageBus, rx: std::sync::mpsc::Receiver<Commands>) {
         let command = rx.recv().unwrap();
 
         if matches!(command, Commands::StartDeepSleep) {
@@ -65,16 +72,16 @@ impl BleModule {
 
         let server = ble_device.get_server();
 
-        let events = events_channel.clone();
+        let bus_clone = bus.clone();
         server.on_connect(move |server, desc| {
             info!("client connected");
-            events.send(Events::BluetoothConnected).unwrap();
+            bus_clone.send_event(Events::BluetoothConnected);
         });
 
-        let events_b = events_channel.clone();
+        let bus_clone = bus.clone();
         server.on_disconnect(move |server, desc| {
             info!("client disconnected");
-            events_b.send(Events::BluetoothDisconnected).unwrap();
+            bus_clone.send_event(Events::BluetoothDisconnected);
         });
 
         let service = server.create_service(Self::SERVICE_GUID);
@@ -105,9 +112,7 @@ impl BleModule {
             })
             .on_write(move |args| {
                 let data = args.recv_data();
-                events_channel
-                    .send(Events::IncomingData(Vec::from(data)))
-                    .unwrap();
+                bus.send_event(Events::IncomingData(Vec::from(data)));
             });
 
         let advertising = ble_device.get_advertising();
