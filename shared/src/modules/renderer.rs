@@ -1,7 +1,6 @@
 use embedded_graphics::pixelcolor::raw::RawU16;
 use time::Instant;
 use time::{Duration, OffsetDateTime, Time};
-use tokio::runtime::Handle;
 
 use time::macros::format_description;
 
@@ -172,7 +171,6 @@ where
         let length: f32 = 5.0;
 
         let radius = (TDisplay::FRAME_BUFFER_SIDE / 2) as f32;
-        let thickness = 3;
 
         let style = PrimitiveStyle::with_stroke(TDisplay::ColorModel::RED, 3);
 
@@ -279,7 +277,7 @@ where
         Graphics::<TDisplay>::icon(frame, Point::new(120 - 18 / 2, 15), &icon);
     }
 
-    fn render_loop(bus: MessageBus, mut rx: Receiver<Events>) {
+    fn render_loop(_bus: MessageBus, mut rx: Receiver<Events>) {
         let mut display = TDisplay::create();
         let mut state: ViewModel = ViewModel {
             battery_level: None,

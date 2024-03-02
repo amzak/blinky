@@ -47,14 +47,3 @@ impl<'d> HAL<'d> {
         }
     }
 }
-
-#[derive(PartialEq, Clone, Debug)]
-pub enum WakeupCause {
-    Undef,
-    All,
-    Ext0,
-    Ext1,
-    Timer,
-    Touch,
-    Ulp,
-}

@@ -5,7 +5,7 @@
 use blinky_shared::commands::Commands;
 use blinky_shared::message_bus::MessageBus;
 use blinky_shared::modules::renderer::Renderer;
-use esp_idf_hal::i2c::{I2cDriver, I2C0};
+use esp_idf_hal::i2c::I2cDriver;
 use esp_idf_hal::peripherals::Peripherals;
 use esp_idf_svc::log::{set_target_level, EspLogger};
 use log::*;
@@ -13,7 +13,6 @@ use peripherals::i2c_proxy_async::I2cProxyAsync;
 use std::future::Future;
 use std::thread;
 use tokio::join;
-use tokio::task::JoinHandle;
 
 extern crate blinky_shared;
 
@@ -127,7 +126,7 @@ async fn main_async() -> Result<(), Box<dyn std::error::Error>> {
         message_bus.send_cmd(Commands::GetTemperature);
     };
 
-    let res = join!(
+    let _ = join!(
         logging_task,
         rtc_task,
         time_sync_task,

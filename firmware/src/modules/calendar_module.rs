@@ -112,7 +112,7 @@ impl BusHandler<Context> for CalendarModule {
 }
 
 impl CalendarModule {
-    pub async fn start(mut bus: MessageBus) {
+    pub async fn start(bus: MessageBus) {
         info!("starting...");
 
         let context = Context {

@@ -90,7 +90,7 @@ impl BusHandler<Context> for PersisterModule {
 }
 
 impl PersisterModule {
-    pub async fn start(mut bus: MessageBus) {
+    pub async fn start(bus: MessageBus) {
         info!("starting...");
 
         let storage = NvsStorage::create(NVS_NAMESPACE);

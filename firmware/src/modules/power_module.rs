@@ -38,7 +38,7 @@ impl BusHandler<Context> for PowerModule {
         }
     }
 
-    async fn command_handler(bus: &BusSender, context: &mut Context, command: Commands) {}
+    async fn command_handler(_bus: &BusSender, _context: &mut Context, _command: Commands) {}
 }
 
 impl PowerModule {
@@ -148,9 +148,9 @@ impl PowerModule {
 
     fn setup_wakeup_sources() {
         unsafe {
-            let result = esp_idf_sys::esp_sleep_enable_ext0_wakeup(gpio_num_t_GPIO_NUM_34, 0); // key 2
+            let _result = esp_idf_sys::esp_sleep_enable_ext0_wakeup(gpio_num_t_GPIO_NUM_34, 0); // key 2
 
-            let result_ext1 = esp_idf_sys::esp_sleep_enable_ext1_wakeup(
+            let _result_ext1 = esp_idf_sys::esp_sleep_enable_ext1_wakeup(
                 // accel, touchpad
                 1 << 32,
                 esp_sleep_ext1_wakeup_mode_t_ESP_EXT1_WAKEUP_ALL_LOW,

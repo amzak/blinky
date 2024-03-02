@@ -53,7 +53,7 @@ impl Into<OffsetDateTime> for ReferenceTimeUtc {
 }
 
 impl ReferenceTimeUtc {
-    pub fn to_offset_dt(self, tz: UtcOffset) -> OffsetDateTime {
+    pub fn _to_offset_dt(self, tz: UtcOffset) -> OffsetDateTime {
         OffsetDateTime::from_unix_timestamp(self.unix_epoch_seconds + tz.whole_seconds() as i64)
             .unwrap()
             .replace_offset(tz)
@@ -119,7 +119,7 @@ impl BusHandler<Context> for ReferenceTime {
 }
 
 impl ReferenceTime {
-    pub async fn start(mut bus: MessageBus) {
+    pub async fn start(bus: MessageBus) {
         info!("starting...");
 
         let context = Context { now_opt: None };
@@ -153,14 +153,14 @@ impl ReferenceTime {
         return Ok(now);
     }
 
-    fn handle_reference_location(bus: &BusSender, data: &[u8]) {
+    fn handle_reference_location(_bus: &BusSender, data: &[u8]) {
         let deserialize_result = rmp_serde::from_slice(data);
         if let Err(err) = deserialize_result {
             error!("{}", err);
             return;
         }
 
-        let reference_location: ReferenceLocationPacket = deserialize_result.unwrap();
+        let _reference_location: ReferenceLocationPacket = deserialize_result.unwrap();
     }
 
     async fn handle_reference_calendar_event(bus: &BusSender, data: &[u8], offset: UtcOffset) {

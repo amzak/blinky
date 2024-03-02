@@ -1,7 +1,6 @@
 #![feature(vec_push_within_capacity)]
 #![feature(duration_constructors)]
 
-use std::future::IntoFuture;
 use std::ops::Add;
 
 use blinky_shared::calendar::CalendarEvent;
@@ -9,20 +8,10 @@ use blinky_shared::events::Events;
 use blinky_shared::message_bus::MessageBus;
 use blinky_shared::{commands::Commands, modules::renderer::Renderer};
 use display::SimDisplay;
-use embedded_graphics::{
-    mono_font::{ascii::FONT_6X9, MonoTextStyle},
-    pixelcolor::Rgb565,
-    prelude::*,
-    primitives::{Circle, Line, PrimitiveStyle, Rectangle},
-    text::Text,
-};
-use embedded_graphics_simulator::{OutputSettingsBuilder, SimulatorDisplay, Window};
 use env_logger::{Builder, Target};
 use log::{info, LevelFilter};
-use time::{Date, OffsetDateTime, PrimitiveDateTime, Time, UtcOffset};
+use time::{OffsetDateTime, Time};
 use tokio::join;
-use tokio::runtime::Handle;
-use tokio::sync::broadcast;
 use tokio::time::{sleep, Duration};
 
 mod display;
@@ -47,16 +36,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 async fn main_async() -> Result<(), Box<dyn std::error::Error>> {
-    let remaining_stack = stacker::remaining_stack();
-    info!("remaining_stack {:?}", remaining_stack);
-
     let message_bus = MessageBus::new();
 
     let message_bus_clone = message_bus.clone();
 
     let renderer_task = Renderer::<SimDisplay>::start(message_bus_clone);
-
-    info!("remaining_stack {:?}", remaining_stack);
 
     let message_bus_clone = message_bus.clone();
     tokio::task::spawn_blocking(move || {
@@ -110,7 +94,6 @@ async fn main_async() -> Result<(), Box<dyn std::error::Error>> {
         }
          */
 
-        info!("remaining_stack {:?}", stacker::remaining_stack());
         loop {
             sleep(Duration::from_millis(1000)).await;
 

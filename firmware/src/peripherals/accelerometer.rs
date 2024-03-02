@@ -9,7 +9,6 @@ use tokio::time::{sleep, Duration};
 
 pub struct Accelerometer<'a> {
     accel_base: Bma423<I2cProxyAsync<I2cDriver<'a>>, FullPower>,
-    accel_ex: Bma423Ex<I2cProxyAsync<I2cDriver<'a>>>,
     proxy: I2cProxyAsync<I2cDriver<'a>>,
 }
 
@@ -88,7 +87,6 @@ impl<'a> Accelerometer<'a> {
 
         let accel = Accelerometer {
             accel_base: accel_base_initialized_opt.unwrap(),
-            accel_ex,
             proxy: thermo_proxy,
         };
 

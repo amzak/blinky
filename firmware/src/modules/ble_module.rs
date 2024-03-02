@@ -2,7 +2,6 @@ use esp32_nimble::utilities::BleUuid;
 use esp32_nimble::{uuid128, BLEDevice, NimbleProperties};
 use log::{error, info};
 use std::sync::mpsc::{channel, Sender};
-use tokio::runtime::Handle;
 
 use blinky_shared::commands::Commands;
 use blinky_shared::events::Events;
@@ -15,9 +14,9 @@ struct Context {
 }
 
 impl BusHandler<Context> for BleModule {
-    async fn event_handler(bus: &BusSender, context: &mut Context, event: Events) {}
+    async fn event_handler(_bus: &BusSender, _context: &mut Context, _event: Events) {}
 
-    async fn command_handler(bus: &BusSender, context: &mut Context, command: Commands) {
+    async fn command_handler(_bus: &BusSender, context: &mut Context, command: Commands) {
         match command {
             Commands::RequestReferenceData => {
                 context.tx.send(command).unwrap();
@@ -31,10 +30,9 @@ impl BusHandler<Context> for BleModule {
 }
 
 impl BleModule {
-    const DEVICE_NAME: &str = "ESP32-SmartWatchTest-123456";
+    const DEVICE_NAME: &'static str = "ESP32-SmartWatchTest-123456";
 
     const SERVICE_GUID: BleUuid = uuid128!("5e98f6d5-0837-4147-856f-61873c82da9b");
-    const AD_SERVICE_GUID: BleUuid = uuid128!("8b3c29a1-7817-44c5-b001-856a40aba114");
 
     const STATIC_CHARACTERISTIC: BleUuid = uuid128!("d4e0e0d0-1a2b-11e9-ab14-d663bd873d93");
     const NOTIFYING_CHARACTERISTIC: BleUuid = uuid128!("594429ca-5370-4416-a172-d576986defb3");
@@ -73,13 +71,13 @@ impl BleModule {
         let server = ble_device.get_server();
 
         let bus_clone = bus.clone();
-        server.on_connect(move |server, desc| {
+        server.on_connect(move |_server, _desc| {
             info!("client connected");
             bus_clone.send_event(Events::BluetoothConnected);
         });
 
         let bus_clone = bus.clone();
-        server.on_disconnect(move |server, desc| {
+        server.on_disconnect(move |_server, _desc| {
             info!("client disconnected");
             bus_clone.send_event(Events::BluetoothDisconnected);
         });

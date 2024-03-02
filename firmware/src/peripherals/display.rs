@@ -10,7 +10,7 @@ use esp_idf_hal::spi;
 use esp_idf_hal::spi::config::DriverConfig;
 use esp_idf_hal::spi::{Dma, SpiDeviceDriver, SpiDriver, SpiSingleDeviceDriver, SPI2};
 use esp_idf_hal::units::FromValueType;
-use log::{debug, info};
+use log::info;
 use mipidsi::models::GC9A01;
 use mipidsi::{Builder, Display};
 use std::convert::Infallible;
@@ -126,10 +126,6 @@ impl<'a> ClockDisplay<'a> {
 
         let buffer = v.into_boxed_slice();
         buffer
-    }
-
-    fn get_frame_buffer_size() -> usize {
-        Self::FRAME_BUFFER_SIZE
     }
 }
 

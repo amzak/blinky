@@ -21,9 +21,9 @@ struct Context {
 static mut UTC_OFFSET: Option<UtcOffset> = None;
 
 impl BusHandler<Context> for RtcModule {
-    async fn event_handler(bus: &BusSender, context: &mut Context, event: Events) {}
+    async fn event_handler(_bus: &BusSender, _context: &mut Context, _event: Events) {}
 
-    async fn command_handler(bus: &BusSender, context: &mut Context, command: Commands) {
+    async fn command_handler(_bus: &BusSender, context: &mut Context, command: Commands) {
         match command {
             _ => {
                 context.tx.send(command).await.unwrap();

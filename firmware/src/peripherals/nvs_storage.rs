@@ -1,4 +1,4 @@
-use embedded_svc::storage::RawStorage;
+use blinky_shared::error::Error;
 use esp_idf_svc::nvs;
 use esp_idf_svc::nvs::{EspNvs, NvsDefault};
 use serde::{Deserialize, Serialize};
@@ -6,8 +6,6 @@ use serde::{Deserialize, Serialize};
 pub struct NvsStorage {
     nvs: EspNvs<NvsDefault>,
 }
-
-type Error<'a> = &'a str;
 
 const NVS_KEY_MAX_LENGTH: usize = 15;
 
@@ -30,17 +28,18 @@ impl NvsStorage {
         let len_opt = self
             .nvs
             .blob_len(trimmed_key)
-            .map_err(|_| Box::<Error>::from("nvs len error"))
+            .map_err(|_| Error::from("nvs len error"))
             .unwrap();
 
         if let Some(len) = len_opt {
             let mut buffer = vec![0; len];
             self.nvs.get_raw(trimmed_key, &mut buffer[..]).unwrap();
 
-            return rmp_serde::from_slice(&buffer).map_err(|err| "deserialization error");
+            return rmp_serde::from_slice(&buffer)
+                .map_err(|err| Error::from(format!("deserialization error: {:?}", err)));
         }
 
-        return Err("unable to read nvs");
+        return Err(Error::from("unable to read nvs"));
     }
 
     fn trim_nvs_key(namespace: &str) -> &str {
@@ -60,7 +59,7 @@ impl NvsStorage {
         let len_opt = self
             .nvs
             .blob_len(trimmed_key)
-            .map_err(|_| Box::<Error>::from("nvs len error"))
+            .map_err(|_| Error::from("nvs len error"))
             .unwrap();
 
         if let Some(len) = len_opt {
@@ -70,7 +69,7 @@ impl NvsStorage {
             return Ok(buffer);
         }
 
-        return Err("unable to read nvs");
+        return Err(Error::from("unable to read nvs"));
     }
 
     pub fn write<T>(&mut self, name: &str, data: &T) -> Result<(), Error>

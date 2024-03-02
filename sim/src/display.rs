@@ -8,7 +8,6 @@ use embedded_graphics::{
 };
 use embedded_graphics_framebuf::FrameBuf;
 use embedded_graphics_simulator::{OutputSettingsBuilder, SimulatorDisplay, Window};
-use log::info;
 
 use std::fmt::Debug;
 
@@ -43,7 +42,7 @@ impl ClockDisplayInterface for SimDisplay {
             //.theme(BinaryColorTheme::OledBlue)
             .build();
 
-        let mut window = Window::new("Hello World", &output_settings);
+        let window = Window::new("Hello World", &output_settings);
 
         SimDisplay {
             buffer,

@@ -15,7 +15,7 @@ struct Context<'a> {
 }
 
 impl<'a> BusHandler<Context<'a>> for AccelerometerModule {
-    async fn event_handler(bus: &BusSender, context: &mut Context<'a>, event: Events) {
+    async fn event_handler(_: &BusSender, context: &mut Context<'a>, event: Events) {
         match event {
             Events::TouchOrMove => {
                 Self::read_interrupt_status(&mut context.accel).await;
@@ -39,7 +39,7 @@ impl AccelerometerModule {
     pub async fn start(
         proxy: I2cProxyAsync<I2cDriver<'static>>,
         proxy_ex: I2cProxyAsync<I2cDriver<'static>>,
-        mut bus: MessageBus,
+        bus: MessageBus,
     ) {
         info!("starting...");
 

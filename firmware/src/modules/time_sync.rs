@@ -1,5 +1,5 @@
 use blinky_shared::persistence::{PersistenceUnit, PersistenceUnitKind};
-use log::{debug, error, info};
+use log::{error, info};
 use time::{Duration, OffsetDateTime, UtcOffset};
 use tokio::select;
 use tokio::sync::watch::{self, Sender};
@@ -195,7 +195,5 @@ impl TimeSync {
                 }
             }
         }
-
-        info!("out of tick loop");
     }
 }

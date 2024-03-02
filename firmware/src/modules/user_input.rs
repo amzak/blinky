@@ -13,13 +13,13 @@ use tokio::time::sleep;
 pub struct UserInput {}
 
 impl BusHandler<ContextStub> for UserInput {
-    async fn event_handler(bus: &BusSender, context: &mut ContextStub, event: Events) {}
+    async fn event_handler(_bus: &BusSender, _context: &mut ContextStub, _event: Events) {}
 
-    async fn command_handler(bus: &BusSender, context: &mut ContextStub, command: Commands) {}
+    async fn command_handler(_bus: &BusSender, _context: &mut ContextStub, _command: Commands) {}
 }
 
 impl UserInput {
-    pub async fn start(mut bus: MessageBus) {
+    pub async fn start(bus: MessageBus) {
         info!("starting...");
 
         let pin_driver = Self::setup_irq_driver();

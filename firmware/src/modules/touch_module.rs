@@ -1,5 +1,5 @@
 use crate::peripherals::i2c_proxy_async::I2cProxyAsync;
-use crate::peripherals::touchpad::{Touchpad, TouchpadConfig};
+use crate::peripherals::touchpad::TouchpadConfig;
 use esp_idf_hal::i2c::I2cDriver;
 use log::info;
 

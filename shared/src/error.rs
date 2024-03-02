@@ -16,6 +16,12 @@ impl From<std::io::Error> for Error {
     }
 }
 
+impl From<String> for Error {
+    fn from(error: String) -> Self {
+        Error(error)
+    }
+}
+
 impl From<&str> for Error {
     fn from(error: &str) -> Self {
         Error(String::from(error))
