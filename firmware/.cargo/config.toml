@@ -6,7 +6,8 @@ linker = "ldproxy"
 # runner = "espflash --monitor" # Select this runner for espflash v1.x.x
 # runner = "espflash flash --monitor" # Select this runner for espflash v2.x.x
 runner = "espflash flash -M -p /dev/ttyACM0 -f 80mhz -m dio"
-rustflags = ["--cfg", "espidf_time64", "--cfg", "crossbeam_no_atomic_64", "--cfg", "tokio_unstable", "--cfg", "mio_unsupported_force_poll_poll"] # Extending time_t for ESP IDF 5: https://github.com/esp-rs/rust/issues/110
+#rustflags = ["--cfg", "espidf_time64", "--cfg", "crossbeam_no_atomic_64", "--cfg", "tokio_unstable", "--cfg", "mio_unsupported_force_poll_poll", "-Z", "emit-stack-sizes", "-Z", "print-type-sizes"] # Extending time_t for ESP IDF 5: https://github.com/esp-rs/rust/issues/110
+rustflags = ["--cfg", "espidf_time64", "--cfg", "crossbeam_no_atomic_64"]
 
 [unstable]
 build-std = ["std", "panic_abort"]

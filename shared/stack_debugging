@@ -1,0 +1,4 @@
+readelf -S target/xtensa-esp32-espidf/debug/blinky
+size -A target/xtensa-esp32-espidf/debug/blinky
+objdump -s -j .stack_sizes target/xtensa-esp32-espidf/debug/blinky
+llvm-readelf --stack-sizes target/xtensa-esp32-espidf/debug/blinky
