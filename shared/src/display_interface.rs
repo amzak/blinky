@@ -18,4 +18,6 @@ pub trait ClockDisplayInterface {
         &'a mut self,
         func: impl FnOnce(Self::FrameBuffer<'b>) -> Self::FrameBuffer<'b>,
     );
+
+    fn commit(&mut self);
 }

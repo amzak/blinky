@@ -298,7 +298,6 @@ where
                     Err(err) => match err {
                         tokio::sync::mpsc::error::TryRecvError::Empty => {
                             Self::render(&mut display, &mut state);
-
                             rx.blocking_recv()
                         }
                         tokio::sync::mpsc::error::TryRecvError::Disconnected => {
@@ -398,7 +397,9 @@ where
             );
 
             frame
-        })
+        });
+
+        display.commit();
     }
 
     fn render_events(frame: &mut TDisplay::FrameBuffer<'_>, vm: &mut ViewModel) {

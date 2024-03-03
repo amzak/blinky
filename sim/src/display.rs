@@ -3,11 +3,14 @@ use std::convert::Infallible;
 use blinky_shared::display_interface::ClockDisplayInterface;
 use embedded_graphics::{
     draw_target::DrawTarget,
-    geometry::Size,
+    geometry::{Point, Size},
     pixelcolor::{Rgb565, RgbColor},
+    Pixel,
 };
 use embedded_graphics_framebuf::FrameBuf;
-use embedded_graphics_simulator::{OutputSettingsBuilder, SimulatorDisplay, Window};
+use embedded_graphics_simulator::{
+    BinaryColorTheme, OutputSettingsBuilder, SimulatorDisplay, Window,
+};
 
 use std::fmt::Debug;
 
@@ -59,12 +62,23 @@ impl ClockDisplayInterface for SimDisplay {
 
         let buf: &'b mut [Self::ColorModel; Self::FRAME_BUFFER_SIZE] = data.try_into().unwrap();
 
-        let mut frame = FrameBuf::new(buf, Self::FRAME_BUFFER_SIDE, Self::FRAME_BUFFER_SIDE);
+        let frame = FrameBuf::new(buf, Self::FRAME_BUFFER_SIDE, Self::FRAME_BUFFER_SIDE);
 
-        //frame.clear(Rgb565::BLACK).unwrap();
-        frame = func(frame);
+        func(frame);
+    }
 
-        let t = frame.into_iter();
+    fn commit(&mut self) {
+        let data = self.buffer.as_mut();
+
+        let t = data.into_iter().enumerate().map(|(i, x)| {
+            Pixel(
+                Point::new(
+                    (i % Self::FRAME_BUFFER_SIDE) as i32,
+                    (i / Self::FRAME_BUFFER_SIDE) as i32,
+                ),
+                *x,
+            )
+        });
 
         self.display.draw_iter(t).unwrap();
 

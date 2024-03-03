@@ -91,18 +91,28 @@ impl<'a> ClockDisplayInterface for ClockDisplay<'a> {
             ClockDisplay::FRAME_BUFFER_SIDE,
         );
 
-        let frame_size = frame.size();
-
         let now = Instant::now();
 
         frame = func(frame);
 
         let timing_frame = now.elapsed();
 
-        let data = frame.data;
+        info!("render timing: frame {}", timing_frame);
+    }
+
+    fn commit(&mut self) {
+        let now = Instant::now();
+
+        let data = self.buffer.as_ref();
         let t = data.iter().map(|x| *x);
 
-        let rect = Rectangle::new(Point::zero(), frame_size);
+        let rect = Rectangle::new(
+            Point::zero(),
+            Size::new(
+                Self::FRAME_BUFFER_SIDE as u32,
+                Self::FRAME_BUFFER_SIDE as u32,
+            ),
+        );
 
         let timing_prepare = now.elapsed();
 
@@ -111,8 +121,8 @@ impl<'a> ClockDisplayInterface for ClockDisplay<'a> {
         let timing_render = now.elapsed();
 
         info!(
-            "display timing: frame {} prepare {} render {}",
-            timing_frame, timing_prepare, timing_render
+            "render commit timing: prepare {} render {}",
+            timing_prepare, timing_render
         );
     }
 }
