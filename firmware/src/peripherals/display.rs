@@ -25,7 +25,8 @@ pub type DisplaySPI2<'d> =
 
 pub struct ClockDisplay<'a> {
     display: DisplaySPI2<'a>,
-    buffer: Box<[Rgb565]>,
+    buffer_base: Box<[Rgb565]>,
+    buffer_layers: Vec<Box<[Rgb565]>>,
 }
 
 impl<'a> ClockDisplayInterface for ClockDisplay<'a> {
@@ -69,9 +70,13 @@ impl<'a> ClockDisplayInterface for ClockDisplay<'a> {
             .map_err(|_| Box::<dyn Error>::from("display init"))
             .unwrap();
 
-        let buffer = Self::prepare_frame_buf();
+        let buffer_layers = vec![Self::prepare_frame_buf()];
 
-        let res = ClockDisplay { display, buffer };
+        let res = ClockDisplay {
+            display,
+            buffer_layers,
+            buffer_base: Self::prepare_frame_buf(),
+        };
 
         res
     }
@@ -80,12 +85,12 @@ impl<'a> ClockDisplayInterface for ClockDisplay<'a> {
         &'d mut self,
         func: impl FnOnce(Self::FrameBuffer<'c>) -> Self::FrameBuffer<'c>,
     ) {
-        let data = self.buffer.as_mut();
+        let data = self.buffer_layers[0].as_mut();
 
         let buf: &'c mut [Self::ColorModel; ClockDisplay::FRAME_BUFFER_SIZE] =
             data.try_into().unwrap();
 
-        let mut frame = FrameBuf::new(
+        let frame = FrameBuf::new(
             buf,
             ClockDisplay::FRAME_BUFFER_SIDE,
             ClockDisplay::FRAME_BUFFER_SIDE,
@@ -93,7 +98,7 @@ impl<'a> ClockDisplayInterface for ClockDisplay<'a> {
 
         let now = Instant::now();
 
-        frame = func(frame);
+        func(frame);
 
         let timing_frame = now.elapsed();
 
@@ -103,8 +108,25 @@ impl<'a> ClockDisplayInterface for ClockDisplay<'a> {
     fn commit(&mut self) {
         let now = Instant::now();
 
-        let data = self.buffer.as_ref();
-        let t = data.iter().map(|x| *x);
+        let layers_count = self.buffer_layers.len();
+
+        let timing_prepare = now.elapsed();
+
+        let base_layer = self.buffer_base.as_mut();
+
+        base_layer.fill(Rgb565::BLACK);
+
+        for layer_index in 0..layers_count {
+            let layer = self.buffer_layers[layer_index].as_ref();
+
+            for pixel_index in 0..layer.len() {
+                if layer[pixel_index] == RgbColor::BLACK {
+                    continue;
+                }
+
+                base_layer[pixel_index] = layer[pixel_index];
+            }
+        }
 
         let rect = Rectangle::new(
             Point::zero(),
@@ -114,9 +136,10 @@ impl<'a> ClockDisplayInterface for ClockDisplay<'a> {
             ),
         );
 
-        let timing_prepare = now.elapsed();
+        let data = self.buffer_base.as_ref();
+        let iter = data.iter().map(|x| *x);
 
-        self.display.fill_contiguous(&rect, t).unwrap();
+        self.display.fill_contiguous(&rect, iter).unwrap();
 
         let timing_render = now.elapsed();
 
