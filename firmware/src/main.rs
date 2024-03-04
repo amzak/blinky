@@ -12,7 +12,9 @@ use log::*;
 use peripherals::i2c_proxy_async::I2cProxyAsync;
 use std::future::Future;
 use std::thread;
+use std::time::Duration;
 use tokio::join;
+use tokio::time::sleep;
 
 extern crate blinky_shared;
 
@@ -123,18 +125,17 @@ async fn main_async() -> Result<(), Box<dyn std::error::Error>> {
     let startup_sequence = async move {
         message_bus.send_cmd(Commands::SyncRtc);
         message_bus.send_cmd(Commands::SyncCalendar);
-        message_bus.send_cmd(Commands::GetTemperature);
     };
 
     let _ = join!(
         logging_task,
         rtc_task,
         time_sync_task,
-        ble_task,
+        accel_task,
         renderer_task,
+        ble_task,
         user_input_task,
         touch_task,
-        accel_task,
         reference_time_task,
         power_task,
         persister_task,

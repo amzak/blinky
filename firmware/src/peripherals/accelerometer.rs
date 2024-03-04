@@ -9,7 +9,7 @@ use tokio::time::{sleep, Duration};
 
 pub struct Accelerometer<'a> {
     accel_base: Bma423<I2cProxyAsync<I2cDriver<'a>>, FullPower>,
-    proxy: I2cProxyAsync<I2cDriver<'a>>,
+    pub temperature: f32,
 }
 
 pub struct Thermometer<'a> {
@@ -83,11 +83,11 @@ impl<'a> Accelerometer<'a> {
         let feature_config = accel_ex.get_feature_config().unwrap();
         debug!("feature_config = {:02X?}", feature_config);
 
-        let thermo_proxy = proxy.clone();
+        let temperature = accel_ex.read_temperature().unwrap();
 
         let accel = Accelerometer {
             accel_base: accel_base_initialized_opt.unwrap(),
-            proxy: thermo_proxy,
+            temperature,
         };
 
         Ok(accel)
@@ -97,17 +97,16 @@ impl<'a> Accelerometer<'a> {
         self.accel_base.read_interrupt_status().unwrap()
     }
 
-    pub fn get_thermometer(&self) -> Thermometer<'a> {
-        Thermometer {
-            accel_ex: Bma423Ex::new(self.proxy.clone()),
-        }
-    }
+    // pub fn get_thermometer(&self) -> Thermometer<'a> {
+    //     Thermometer {
+    //         accel_ex: Bma423Ex::new(self.proxy.clone()),
+    //     }
+    // }
 }
 
 impl<'a> Thermometer<'a> {
     pub fn read_temperature(&mut self) -> f32 {
         let t = self.accel_ex.read_temperature().unwrap();
-
         return t;
     }
 }
