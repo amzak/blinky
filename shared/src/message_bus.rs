@@ -153,10 +153,14 @@ impl MessageBus {
     }
 
     pub fn send_cmd(&self, command: Commands) {
-        self.sender.commands_sender.send(command).unwrap();
+        if let Err(err) = self.sender.commands_sender.send(command) {
+            error!("{:?}", err);
+        }
     }
 
     pub fn send_event(&self, event: Events) {
-        self.sender.events_sender.send(event).unwrap();
+        if let Err(err) = self.sender.events_sender.send(event) {
+            error!("{:?}", err);
+        }
     }
 }
