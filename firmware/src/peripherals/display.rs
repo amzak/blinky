@@ -1,4 +1,4 @@
-use blinky_shared::display_interface::ClockDisplayInterface;
+use blinky_shared::display_interface::{ClockDisplayInterface, LayerType, RenderMode};
 use display_interface_spi::SPIInterfaceNoCS;
 use embedded_graphics::pixelcolor::{Rgb565, RgbColor};
 use embedded_graphics::prelude::{DrawTarget, *};
@@ -10,7 +10,7 @@ use esp_idf_hal::spi;
 use esp_idf_hal::spi::config::DriverConfig;
 use esp_idf_hal::spi::{Dma, SpiDeviceDriver, SpiDriver, SpiSingleDeviceDriver, SPI2};
 use esp_idf_hal::units::FromValueType;
-use log::info;
+use log::{debug, info};
 use mipidsi::models::GC9A01;
 use mipidsi::{Builder, Display};
 use std::convert::Infallible;
@@ -27,6 +27,7 @@ pub struct ClockDisplay<'a> {
     display: DisplaySPI2<'a>,
     buffer_base: Box<[Rgb565]>,
     buffer_layers: Vec<Box<[Rgb565]>>,
+    static_rendered: bool,
 }
 
 impl<'a> ClockDisplayInterface for ClockDisplay<'a> {
@@ -70,12 +71,17 @@ impl<'a> ClockDisplayInterface for ClockDisplay<'a> {
             .map_err(|_| Box::<dyn Error>::from("display init"))
             .unwrap();
 
-        let buffer_layers = vec![Self::prepare_frame_buf()];
+        let buffer_layers = vec![
+            Self::prepare_frame_buf(),
+            Self::prepare_frame_buf(),
+            Self::prepare_frame_buf(),
+        ];
 
         let res = ClockDisplay {
             display,
             buffer_layers,
             buffer_base: Self::prepare_frame_buf(),
+            static_rendered: false,
         };
 
         res
@@ -83,14 +89,22 @@ impl<'a> ClockDisplayInterface for ClockDisplay<'a> {
 
     fn render<'c, 'd: 'c>(
         &'d mut self,
+        layer: LayerType,
+        mode: RenderMode,
         func: impl FnOnce(Self::FrameBuffer<'c>) -> Self::FrameBuffer<'c>,
     ) {
-        let data = self.buffer_layers[0].as_mut();
+        if matches!(layer, LayerType::Static) && self.static_rendered {
+            return;
+        }
+
+        let layer_index = layer as usize;
+
+        let data = self.buffer_layers[layer_index].as_mut();
 
         let buf: &'c mut [Self::ColorModel; ClockDisplay::FRAME_BUFFER_SIZE] =
             data.try_into().unwrap();
 
-        let frame = FrameBuf::new(
+        let mut frame = FrameBuf::new(
             buf,
             ClockDisplay::FRAME_BUFFER_SIDE,
             ClockDisplay::FRAME_BUFFER_SIDE,
@@ -98,19 +112,25 @@ impl<'a> ClockDisplayInterface for ClockDisplay<'a> {
 
         let now = Instant::now();
 
+        if matches!(mode, RenderMode::Invalidate) {
+            frame.reset();
+        }
+
         func(frame);
+
+        if matches!(layer, LayerType::Static) {
+            self.static_rendered = true;
+        }
 
         let timing_frame = now.elapsed();
 
-        info!("render timing: frame {}", timing_frame);
+        debug!("render timing: frame {}", timing_frame);
     }
 
     fn commit(&mut self) {
         let now = Instant::now();
 
         let layers_count = self.buffer_layers.len();
-
-        let timing_prepare = now.elapsed();
 
         let base_layer = self.buffer_base.as_mut();
 
@@ -139,11 +159,13 @@ impl<'a> ClockDisplayInterface for ClockDisplay<'a> {
         let data = self.buffer_base.as_ref();
         let iter = data.iter().map(|x| *x);
 
+        let timing_prepare = now.elapsed();
+
         self.display.fill_contiguous(&rect, iter).unwrap();
 
         let timing_render = now.elapsed();
 
-        info!(
+        debug!(
             "render commit timing: prepare {} render {}",
             timing_prepare, timing_render
         );
@@ -159,20 +181,5 @@ impl<'a> ClockDisplay<'a> {
 
         let buffer = v.into_boxed_slice();
         buffer
-    }
-}
-
-impl Drop for ClockDisplay<'_> {
-    fn drop(&mut self) {
-        self.render(|mut frame| {
-            let style = PrimitiveStyle::with_fill(RgbColor::BLACK);
-
-            primitives::Circle::new(Point::zero(), Self::FRAME_BUFFER_SIDE as u32)
-                .into_styled(style)
-                .draw(&mut frame)
-                .unwrap();
-
-            frame
-        });
     }
 }

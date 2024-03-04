@@ -60,9 +60,6 @@ where
 
         let mut clipped = frame.clipped(&bounding_box);
 
-        let clear_color = TDisplay::ColorModel::BLACK;
-        clipped.clear(clear_color).unwrap();
-
         text.draw(&mut clipped).unwrap();
 
         bounding_box

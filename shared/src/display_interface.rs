@@ -4,6 +4,18 @@ use embedded_graphics::{
 };
 use std::fmt::Debug;
 
+#[derive(Clone, Copy)]
+pub enum LayerType {
+    Static = 0,
+    Clock = 1,
+    Events = 2,
+}
+
+pub enum RenderMode {
+    Invalidate,
+    Ammend,
+}
+
 pub trait ClockDisplayInterface {
     type Error: Debug;
     type ColorModel: RgbColor + From<RawU16>;
@@ -16,6 +28,8 @@ pub trait ClockDisplayInterface {
 
     fn render<'b, 'a: 'b>(
         &'a mut self,
+        layer: LayerType,
+        mode: RenderMode,
         func: impl FnOnce(Self::FrameBuffer<'b>) -> Self::FrameBuffer<'b>,
     );
 

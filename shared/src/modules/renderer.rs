@@ -13,7 +13,7 @@ use tokio::sync::mpsc::{channel, Receiver, Sender};
 use crate::calendar::CalendarEvent;
 use crate::calendar::CalendarEventIcon;
 use crate::commands::Commands;
-use crate::display_interface::ClockDisplayInterface;
+use crate::display_interface::{ClockDisplayInterface, LayerType, RenderMode};
 use crate::events::Events;
 use crate::message_bus::{BusHandler, BusSender, MessageBus};
 use embedded_graphics::primitives::{PrimitiveStyle, StyledDrawable};
@@ -106,7 +106,12 @@ where
         let bounds = Self::render_time(frame, vm);
         Self::render_day(frame, vm, &bounds);
         Self::draw_arrow(frame, vm);
+    }
 
+    fn render_static(
+        frame: &mut <TDisplay as ClockDisplayInterface>::FrameBuffer<'_>,
+        vm: &mut ViewModel,
+    ) {
         let style = PrimitiveStyle::with_stroke(TDisplay::ColorModel::WHITE, 1);
         let top_left = Point::new(3, 3);
         Graphics::<TDisplay>::circle(
@@ -368,34 +373,23 @@ where
     }
 
     fn render(display: &mut TDisplay, vm: &mut ViewModel) {
-        display.render(|mut frame| {
-            let now = Instant::now();
+        display.render(LayerType::Static, RenderMode::Invalidate, |mut frame| {
+            Self::render_static(&mut frame, vm);
 
+            frame
+        });
+
+        display.render(LayerType::Clock, RenderMode::Invalidate, |mut frame| {
             Self::render_battery_level(&mut frame, vm);
-
-            let timing_battery = now.elapsed();
-
             Self::render_ble_connected(&mut frame, vm);
-
-            let timing_sync = now.elapsed();
-
+            Self::render_datetime(&mut frame, vm);
             Self::render_temperature(&mut frame, vm);
 
-            let timing_tmpr = now.elapsed();
+            frame
+        });
 
-            Self::render_datetime(&mut frame, vm);
-
-            let timing_datetime = now.elapsed();
-
+        display.render(LayerType::Events, RenderMode::Ammend, |mut frame| {
             Self::render_events(&mut frame, vm);
-
-            let timing_events = now.elapsed();
-
-            info!(
-                "rendering timing: battery {} sync {} tmpr {} datetime {} events {}",
-                timing_battery, timing_sync, timing_tmpr, timing_datetime, timing_events
-            );
-
             frame
         });
 
@@ -415,14 +409,14 @@ where
 
         let half_day = Duration::hours(12);
 
-        info!("rendering {} events...", vm.calendar_events.len());
+        debug!("rendering {} events...", vm.calendar_events.len());
 
         for event in vm.calendar_events.iter() {
             if event.end - event.start >= half_day {
                 continue;
             }
 
-            if now - event.start > half_day {
+            if event.start - now > half_day {
                 continue;
             }
 
