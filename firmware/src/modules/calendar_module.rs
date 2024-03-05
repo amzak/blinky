@@ -141,14 +141,19 @@ impl CalendarModule {
                     calendar_info_restored.events.len()
                 );
 
-                let calendar_events_restored = calendar_info_restored
+                let calendar_events_restored: Vec<_> = calendar_info_restored
                     .events
                     .into_iter()
-                    .map(|x| CalendarEvent::new(x, utc_offset));
+                    .map(|x| CalendarEvent::new(x, utc_offset))
+                    .collect();
 
-                for event in calendar_events_restored {
-                    calendar_events.insert(event.clone());
-                    bus.send_event(Events::CalendarEvent(event));
+                let chunk_size = 5;
+                for chunk in calendar_events_restored.chunks(chunk_size) {
+                    for event in chunk {
+                        calendar_events.insert(event.clone());
+                    }
+
+                    bus.send_event(Events::CalendarEventsBatch(Vec::from(chunk)));
                 }
             }
             Err(error) => {

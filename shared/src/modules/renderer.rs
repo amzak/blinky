@@ -356,12 +356,11 @@ where
                 view_model.ble_connected = Some(false);
             }
             Events::CalendarEvent(calendar_event) => {
-                let old_count = view_model.calendar_events.len();
-                let updated = view_model.calendar_events.replace(calendar_event);
-                let new_count = view_model.calendar_events.len();
-
-                if updated.is_some() || old_count != new_count {
-                    view_model.force_update_events = true;
+                append_event(view_model, calendar_event);
+            }
+            Events::CalendarEventsBatch(batch) => {
+                for item in batch {
+                    append_event(view_model, item);
                 }
             }
             _ => {}
