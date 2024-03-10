@@ -45,15 +45,16 @@ impl BusHandler<Context> for CalendarModule {
                 context.now = Some(time_now);
             }
             Events::ReferenceCalendarEvent(reference_calendar_event) => {
-                let replaced = context
-                    .calendar_events
-                    .replace(reference_calendar_event.clone());
-
-                if replaced.is_some() {
-                    info!("event updated {}", replaced.unwrap().id);
-                }
+                handle_event(context, &reference_calendar_event);
 
                 bus.send_event(Events::CalendarEvent(reference_calendar_event));
+            }
+            Events::ReferenceCalendarEventBatch(batch) => {
+                for event in batch.as_slice() {
+                    handle_event(context, &event);
+                }
+
+                bus.send_event(Events::CalendarEventsBatch(batch));
             }
             Events::BluetoothDisconnected => {
                 if context.calendar_events.len() == 0 {
@@ -111,6 +112,16 @@ impl BusHandler<Context> for CalendarModule {
     }
 }
 
+fn handle_event(context: &mut Context, reference_calendar_event: &CalendarEvent) {
+    let replaced = context
+        .calendar_events
+        .replace(reference_calendar_event.clone());
+
+    if replaced.is_some() {
+        info!("event updated {}", replaced.unwrap().id);
+    }
+}
+
 impl CalendarModule {
     pub async fn start(bus: MessageBus) {
         info!("starting...");
@@ -132,7 +143,7 @@ impl CalendarModule {
         posponed_restore: PersistenceUnit,
         utc_offset: UtcOffset,
     ) -> bool {
-        let res: Result<CalendarStateDto, Error> = posponed_restore.deserialize();
+        let res: Result<CalendarStateDto, Error> = posponed_restore.deserialize().await;
 
         match res {
             Ok(calendar_info_restored) => {

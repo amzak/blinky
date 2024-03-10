@@ -104,6 +104,7 @@ impl MessageBus {
                 commands_receiver,
                 events_receiver,
                 &mut context,
+                handler_type,
             )
             .await;
 
@@ -121,6 +122,7 @@ impl MessageBus {
         commands_receiver: &mut Receiver<Commands>,
         events_receiver: &mut Receiver<Events>,
         context: &mut TContext,
+        handler_type: &str,
     ) -> bool
     where
         THandler: BusHandler<TContext>,
@@ -138,13 +140,13 @@ impl MessageBus {
 
                         THandler::command_handler(sender, context, command).await;
                     },
-                    Err(err) => {error!("{:?}", err)},
+                    Err(err) => {error!("{:?} {:?}", err, handler_type)},
                 }
              }
              event_res = events_receiver.recv() => {
                 match event_res {
                     Ok(event) => THandler::event_handler(sender, context, event).await,
-                    Err(err) => {error!("{:?}", err)},
+                    Err(err) => {error!("{:?} {:?}", err, handler_type)},
                 }
             }
         }

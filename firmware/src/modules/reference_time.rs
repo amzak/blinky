@@ -1,4 +1,4 @@
-use blinky_shared::calendar::CalendarEvent;
+use blinky_shared::calendar::{CalendarEvent, CalendarEventDto};
 use blinky_shared::contract::packets::{
     ReferenceCalendarEventPacket, ReferenceDataPacket, ReferenceDataPacketType,
     ReferenceLocationPacket, ReferenceTimePacket,
@@ -6,8 +6,10 @@ use blinky_shared::contract::packets::{
 use blinky_shared::error::Error;
 use log::{error, info, warn};
 use serde::{Deserialize, Serialize};
+use std::future::Future;
 use std::ops::Add;
 use time::{OffsetDateTime, UtcOffset};
+use tokio::task::JoinHandle;
 use tokio::time::Duration;
 
 use blinky_shared::commands::Commands;
@@ -19,6 +21,7 @@ pub struct ReferenceTime {}
 
 pub struct Context {
     now_opt: Option<OffsetDateTime>,
+    unprocessed_events: Vec<ReferenceDataPacket>,
 }
 
 #[derive(Debug, Deserialize, PartialEq, Clone)]
@@ -64,15 +67,13 @@ impl BusHandler<Context> for ReferenceTime {
     async fn event_handler(bus: &BusSender, context: &mut Context, event: Events) {
         match event {
             Events::IncomingData(data) => {
-                let deserialize_result = rmp_serde::from_slice(&data);
+                let deserialize_result = Self::deserialize(data).await;
                 if let Err(err) = deserialize_result {
                     error!("{}", err);
                     return;
                 }
 
                 let reference_data: ReferenceDataPacket = deserialize_result.unwrap();
-
-                info!("{:?}", reference_data);
 
                 match reference_data.packet_type {
                     ReferenceDataPacketType::Time => {
@@ -87,20 +88,19 @@ impl BusHandler<Context> for ReferenceTime {
                         context.now_opt = Some(now_result.unwrap());
                     }
                     ReferenceDataPacketType::Location => {
-                        Self::handle_reference_location(bus, reference_data.packet_payload);
+                        Self::handle_reference_location(bus, reference_data.packet_payload).await;
                     }
                     ReferenceDataPacketType::CalendarEvent => {
-                        if context.now_opt.is_none() {
-                            warn!("calendar event skipped");
-                        }
-
+                        context.unprocessed_events.push(reference_data);
+                    }
+                    ReferenceDataPacketType::SyncCompleted => {
                         let offset_seconds = context.now_opt.unwrap().offset();
-                        Self::handle_reference_calendar_event(
-                            bus,
-                            reference_data.packet_payload,
-                            offset_seconds,
-                        )
-                        .await;
+                        bus.send_cmd(Commands::DisconnectBle);
+
+                        if context.unprocessed_events.len() > 0 {
+                            Self::handle_unprocessed_events(bus.clone(), context, offset_seconds)
+                                .await;
+                        }
                     }
                 }
             }
@@ -122,15 +122,21 @@ impl ReferenceTime {
     pub async fn start(bus: MessageBus) {
         info!("starting...");
 
-        let context = Context { now_opt: None };
+        let context = Context {
+            now_opt: None,
+            unprocessed_events: vec![],
+        };
 
         MessageBus::handle::<Context, Self>(bus, context).await;
 
         info!("done.");
     }
 
-    async fn handle_reference_time(bus: &BusSender, data: &[u8]) -> Result<OffsetDateTime, Error> {
-        let deserialize_result = rmp_serde::from_slice(data);
+    async fn handle_reference_time(
+        bus: &BusSender,
+        data: Vec<u8>,
+    ) -> Result<OffsetDateTime, Error> {
+        let deserialize_result = Self::deserialize(data).await;
         if let Err(err) = deserialize_result {
             return Err(Error::from(err.to_string().as_str()));
         }
@@ -153,8 +159,8 @@ impl ReferenceTime {
         return Ok(now);
     }
 
-    fn handle_reference_location(_bus: &BusSender, data: &[u8]) {
-        let deserialize_result = rmp_serde::from_slice(data);
+    async fn handle_reference_location(_bus: &BusSender, data: Vec<u8>) {
+        let deserialize_result = Self::deserialize(data).await;
         if let Err(err) = deserialize_result {
             error!("{}", err);
             return;
@@ -163,17 +169,32 @@ impl ReferenceTime {
         let _reference_location: ReferenceLocationPacket = deserialize_result.unwrap();
     }
 
-    async fn handle_reference_calendar_event(bus: &BusSender, data: &[u8], offset: UtcOffset) {
-        let deserialize_result = rmp_serde::from_slice(data);
-        if let Err(err) = deserialize_result {
-            error!("{}", err);
-            return;
-        }
+    fn deserialize<TPacket>(data: Vec<u8>) -> JoinHandle<TPacket>
+    where
+        TPacket: for<'a> Deserialize<'a> + Send + 'static,
+    {
+        tokio::task::spawn_blocking(move || {
+            let data_inner = data;
+            let res = rmp_serde::from_slice(&data_inner).unwrap();
+            res
+        })
+    }
 
-        let reference_calendar_event: ReferenceCalendarEventPacket = deserialize_result.unwrap();
+    async fn handle_unprocessed_events(bus: BusSender, context: &mut Context, offset: UtcOffset) {
+        let packets: Vec<_> = context.unprocessed_events.drain(..).collect();
 
-        let calendar_event = CalendarEvent::new(reference_calendar_event.calendar_event, offset);
+        tokio::task::spawn_blocking(move || {
+            let mut events_iter = packets.iter().map(|x| {
+                let reference_calendar_event: ReferenceCalendarEventPacket =
+                    rmp_serde::from_slice(&x.packet_payload).unwrap();
+                CalendarEvent::new(reference_calendar_event.calendar_event, offset)
+            });
 
-        bus.send_event(Events::ReferenceCalendarEvent(calendar_event));
+            for chunk in events_iter.next_chunk::<5>() {
+                bus.send_event(Events::ReferenceCalendarEventBatch(chunk.to_vec()));
+            }
+        })
+        .await
+        .unwrap();
     }
 }
