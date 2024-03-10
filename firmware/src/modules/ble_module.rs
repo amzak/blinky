@@ -18,11 +18,10 @@ impl BusHandler<Context> for BleModule {
 
     async fn command_handler(_bus: &BusSender, context: &mut Context, command: Commands) {
         match command {
-            Commands::RequestReferenceData => {
-                context.tx.send(command).unwrap();
-            }
-            Commands::StartDeepSleep => {
-                context.tx.send(command).unwrap();
+            Commands::RequestReferenceData | Commands::DisconnectBle | Commands::StartDeepSleep => {
+                if let Err(err) = context.tx.send(command) {
+                    error!("{:?}", err);
+                }
             }
             _ => {}
         }
