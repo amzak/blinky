@@ -1,6 +1,6 @@
 use esp32_nimble::utilities::BleUuid;
-use esp32_nimble::{uuid128, BLEDevice, NimbleProperties};
-use log::{error, info};
+use esp32_nimble::{uuid128, BLEAdvertisementData, BLEDevice, NimbleProperties};
+use log::{error, info, warn};
 use std::sync::mpsc::{channel, Sender};
 
 use blinky_shared::commands::Commands;
@@ -68,6 +68,7 @@ impl BleModule {
         let ble_device = BLEDevice::take();
 
         let server = ble_device.get_server();
+        server.advertise_on_disconnect(false);
 
         let bus_clone = bus.clone();
         server.on_connect(move |_server, _desc| {
@@ -114,18 +115,16 @@ impl BleModule {
 
         let advertising = ble_device.get_advertising();
 
-        if !advertising.lock().is_advertising() {
-            if let Err(error) = advertising
-                .lock()
-                .name(Self::DEVICE_NAME)
-                .add_service_uuid(Self::SERVICE_GUID)
-                .start_with_duration(15_000)
-            {
-                error!("can't start ble advertising, error {:?}", error);
-                return;
-            }
-        } else {
-            info!("start ble advertising skipped");
+        let mut ad_data = BLEAdvertisementData::new();
+        ad_data
+            .name(Self::DEVICE_NAME)
+            .add_service_uuid(Self::SERVICE_GUID);
+
+        advertising.lock().set_data(&mut ad_data).unwrap();
+
+        if let Err(error) = advertising.lock().start() {
+            error!("can't start ble advertising, error {:?}", error);
+            return;
         }
 
         info!("advertising...");
@@ -139,8 +138,12 @@ impl BleModule {
 
         let command = rx.recv().unwrap();
 
-        if matches!(command, Commands::StartDeepSleep) {
-            BLEDevice::deinit();
+        advertising.lock().stop().unwrap();
+
+        info!("advertising stopped.");
+
+        if let Err(err) = BLEDevice::deinit_full() {
+            error!("{:?}", err);
         }
     }
 }
