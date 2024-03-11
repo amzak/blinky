@@ -14,18 +14,24 @@ use embedded_icon::{
 
 use super::graphics::Graphics;
 
+#[macro_export]
+macro_rules! icon {
+    ($icon:ident, $size:ident, $color:ident) => {
+        embedded_icon::mdi::size12px::$icon::new($color)
+    };
+}
+
 pub fn render_event_icon<TDisplay: ClockDisplayInterface>(
     frame: &mut TDisplay::FrameBuffer<'_>,
     icon_type: CalendarEventIcon,
     center: Point,
+    size: u8,
     color: TDisplay::ColorModel,
 ) {
     match icon_type {
-        CalendarEventIcon::Meeting => Graphics::<TDisplay>::icon_center(
-            frame,
-            center,
-            &small_mdi_icons::AccountMultiple::new(color),
-        ),
+        CalendarEventIcon::Meeting => {
+            Graphics::<TDisplay>::icon_center(frame, center, &icon!(AccountMultiple, size, color))
+        }
         CalendarEventIcon::Birthday => Graphics::<TDisplay>::icon_center(
             frame,
             center,
