@@ -184,13 +184,16 @@ impl ReferenceTime {
         let packets: Vec<_> = context.unprocessed_events.drain(..).collect();
 
         tokio::task::spawn_blocking(move || {
-            let mut events_iter = packets.iter().map(|x| {
-                let reference_calendar_event: ReferenceCalendarEventPacket =
-                    rmp_serde::from_slice(&x.packet_payload).unwrap();
-                CalendarEvent::new(reference_calendar_event.calendar_event, offset)
-            });
+            let events_iter: Vec<_> = packets
+                .iter()
+                .map(|x| {
+                    let reference_calendar_event: ReferenceCalendarEventPacket =
+                        rmp_serde::from_slice(&x.packet_payload).unwrap();
+                    CalendarEvent::new(reference_calendar_event.calendar_event, offset)
+                })
+                .collect();
 
-            for chunk in events_iter.next_chunk::<5>() {
+            for chunk in events_iter.chunks(5) {
                 bus.send_event(Events::ReferenceCalendarEventBatch(chunk.to_vec()));
             }
         })

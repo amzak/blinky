@@ -20,7 +20,9 @@ pub enum Events {
     Charging(bool),
     InSync(bool),
     ReferenceCalendarEvent(CalendarEvent),
+    ReferenceCalendarEventBatch(Vec<CalendarEvent>),
     CalendarEvent(CalendarEvent),
+    CalendarEventsBatch(Vec<CalendarEvent>),
     Restored(PersistenceUnit),
     Term,
 }

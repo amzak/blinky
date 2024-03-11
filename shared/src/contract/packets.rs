@@ -12,16 +12,17 @@ pub enum ReferenceDataPacketType {
     Time = 1,
     Location = 2,
     CalendarEvent = 3,
+    SyncCompleted = 100,
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
-pub struct ReferenceDataPacket<'a> {
+pub struct ReferenceDataPacket {
     pub version: i32,
     pub packet_type: ReferenceDataPacketType,
     pub packet_payload_size: i32,
 
     #[serde(with = "serde_bytes")]
-    pub packet_payload: &'a [u8],
+    pub packet_payload: Vec<u8>,
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]

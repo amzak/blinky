@@ -57,6 +57,15 @@ impl BusSender {
     }
 }
 
+impl Clone for BusSender {
+    fn clone(&self) -> Self {
+        Self {
+            commands_sender: self.commands_sender.clone(),
+            events_sender: self.events_sender.clone(),
+        }
+    }
+}
+
 impl MessageBus {
     pub fn new() -> Self {
         let (commands_sender, commands_recv) = channel::<Commands>(20);
