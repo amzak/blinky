@@ -50,7 +50,7 @@ pub struct ViewModel {
 
 impl<TDisplay> BusHandler<Context> for Renderer<TDisplay> {
     async fn event_handler(_bus: &BusSender, context: &mut Context, event: Events) {
-        if context.pause {
+        if context.pause && matches!(event, Events::TimeNow(_)) {
             return;
         }
 
