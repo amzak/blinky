@@ -18,7 +18,7 @@ use crate::events::Events;
 use crate::message_bus::{BusHandler, BusSender, MessageBus};
 use embedded_graphics::primitives::{PrimitiveStyle, StyledDrawable};
 use embedded_graphics::{mono_font::MonoTextStyle, prelude::*, primitives};
-use std::collections::HashSet;
+use std::collections::{BTreeSet, HashSet};
 use std::f32::consts::PI;
 use std::marker::PhantomData;
 use std::ops::Add;
@@ -43,7 +43,7 @@ pub struct ViewModel {
     ble_connected: Option<bool>,
     temperature: Option<f32>,
     time: Option<OffsetDateTime>,
-    calendar_events: HashSet<CalendarEvent>,
+    calendar_events: BTreeSet<CalendarEvent>,
 
     force_update_events: bool,
 }
@@ -290,7 +290,7 @@ where
             ble_connected: None,
             temperature: None,
             time: None,
-            calendar_events: HashSet::new(),
+            calendar_events: BTreeSet::new(),
             force_update_events: true,
         };
 

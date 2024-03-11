@@ -56,6 +56,18 @@ impl Hash for CalendarEvent {
     }
 }
 
+impl Ord for CalendarEvent {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        other.start.cmp(&self.start)
+    }
+}
+
+impl PartialOrd for CalendarEvent {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
 impl CalendarEvent {
     pub fn new(dto: CalendarEventDto, tz: UtcOffset) -> CalendarEvent {
         CalendarEvent {
