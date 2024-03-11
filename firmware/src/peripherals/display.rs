@@ -58,6 +58,8 @@ impl<'a> ClockDisplayInterface for ClockDisplay<'a> {
 
         let spi_config = spi::config::Config::default()
             .baudrate(80_000_000.Hz())
+            .polling(true)
+            .queue_size(16)
             .write_only(true);
 
         let spi = SpiDeviceDriver::new(driver, Some(cs), &spi_config).unwrap();
