@@ -73,7 +73,7 @@ impl BusHandler<Context> for TimeSync {
                     return;
                 }
 
-                let res = unit.deserialize();
+                let res = unit.deserialize().await;
 
                 match res {
                     Ok(sync_info_restored) => {

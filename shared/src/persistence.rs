@@ -48,9 +48,9 @@ impl PersistenceUnit {
 }
 
 impl PersistenceUnit {
-    pub fn deserialize<T>(self) -> Result<T, Error>
+    pub async fn deserialize<T>(self) -> Result<T, Error>
     where
-        for<'a> T: Deserialize<'a>,
+        for<'a> T: Deserialize<'a> + Send + 'static,
     {
         if self.data.is_err() {
             return Err(self.data.err().unwrap());
@@ -58,7 +58,17 @@ impl PersistenceUnit {
 
         let data_arc = self.data.unwrap();
 
-        rmp_serde::from_slice::<T>(&data_arc).map_err(|err| Error::from(err.to_string().as_str()))
+        let data_arc_clone = data_arc.clone();
+
+        let result = tokio::spawn(async move {
+            let slice = data_arc_clone.as_slice();
+            let res = rmp_serde::from_slice::<T>(slice).unwrap();
+
+            res
+        })
+        .await;
+
+        result.map_err(|err| Error::from(err.to_string().as_str()))
     }
 }
 
