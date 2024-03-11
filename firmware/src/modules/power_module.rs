@@ -29,11 +29,10 @@ struct Context {
 impl BusHandler<Context> for PowerModule {
     async fn event_handler(bus: &BusSender, context: &mut Context, event: Events) {
         match event {
-            Events::TouchOrMove => {
+            Events::TouchOrMove | Events::BluetoothConnected => {
                 bus.send_cmd(Commands::ResumeRendering);
                 context.idle_reset.notify_one();
             }
-            Events::CalendarEvent(_) => {}
             _ => {}
         }
     }
