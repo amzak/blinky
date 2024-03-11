@@ -271,15 +271,12 @@ where
             return;
         }
 
-        let color = if vm.ble_connected.unwrap() {
-            TDisplay::ColorModel::WHITE
-        } else {
-            TDisplay::ColorModel::BLACK
+        let is_ble_connected = vm.ble_connected.unwrap();
+        if is_ble_connected {
+            let icon = size18px::Bluetooth::new(TDisplay::ColorModel::WHITE);
+
+            Graphics::<TDisplay>::icon(frame, Point::new(120 - 18 / 2, 15), &icon);
         };
-
-        let icon = Bluetooth::new(color);
-
-        Graphics::<TDisplay>::icon(frame, Point::new(120 - 18 / 2, 15), &icon);
     }
 
     fn render_loop(_bus: MessageBus, mut rx: Receiver<Events>) {
