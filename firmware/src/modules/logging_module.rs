@@ -18,6 +18,9 @@ impl BusHandler<ContextStub> for LoggingModule {
                     error!("Failed to restore {} error: {}", unit.kind.as_ref(), err);
                 }
             },
+            Events::IncomingData(data) => {
+                info!("IncomingData with {} bytes", data.len());
+            }
             _ => {
                 info!("{:?}", event);
             }
