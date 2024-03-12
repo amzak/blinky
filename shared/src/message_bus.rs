@@ -1,6 +1,6 @@
 use std::{any::type_name, future::Future, mem};
 
-use log::{error, info};
+use log::{debug, error, info};
 use tokio::{
     select,
     sync::broadcast::{channel, Receiver, Sender},
@@ -90,7 +90,7 @@ impl MessageBus {
 
         let size_of_context = mem::size_of::<TContext>();
 
-        info!("context {} bytes", size_of_context);
+        debug!("context {} bytes", size_of_context);
 
         info!("starting handle loop... {}", handler_type);
 
