@@ -129,6 +129,10 @@ impl BleModule {
 
         info!("advertising...");
 
+        advertising
+            .lock()
+            .on_complete(|x| info!("advertising completed."));
+
         /*
         for i in 0..60 {
             notifying_characteristic.lock().set_value(format!("tick {}", i).as_bytes()).notify();
@@ -137,10 +141,6 @@ impl BleModule {
         */
 
         let command = rx.recv().unwrap();
-
-        advertising.lock().stop().unwrap();
-
-        info!("advertising stopped.");
 
         if let Err(err) = BLEDevice::deinit_full() {
             error!("{:?}", err);
