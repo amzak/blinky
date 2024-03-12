@@ -1,4 +1,4 @@
-use blinky_shared::calendar::{CalendarEvent, CalendarEventDto};
+use blinky_shared::calendar::CalendarEvent;
 use blinky_shared::contract::packets::{
     ReferenceCalendarEventPacket, ReferenceDataPacket, ReferenceDataPacketType,
     ReferenceLocationPacket, ReferenceTimePacket,
@@ -6,10 +6,9 @@ use blinky_shared::contract::packets::{
 use blinky_shared::error::Error;
 use log::{error, info, warn};
 use serde::{Deserialize, Serialize};
-use std::future::Future;
 use std::ops::Add;
 use time::{OffsetDateTime, UtcOffset};
-use tokio::task::JoinHandle;
+use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::time::Duration;
 
 use blinky_shared::commands::Commands;
@@ -20,6 +19,10 @@ use blinky_shared::message_bus::{BusHandler, BusSender, MessageBus};
 pub struct ReferenceTime {}
 
 pub struct Context {
+    tx: Sender<Events>,
+}
+
+pub struct ProcessingContext {
     now_opt: Option<OffsetDateTime>,
     unprocessed_events: Vec<ReferenceDataPacket>,
 }
@@ -64,54 +67,22 @@ impl ReferenceTimeUtc {
 }
 
 impl BusHandler<Context> for ReferenceTime {
-    async fn event_handler(bus: &BusSender, context: &mut Context, event: Events) {
+    async fn event_handler(_bus: &BusSender, context: &mut Context, event: Events) {
         match event {
-            Events::IncomingData(data) => {
-                let deserialize_result = Self::deserialize(data).await;
-                if let Err(err) = deserialize_result {
-                    error!("{}", err);
-                    return;
-                }
-
-                let reference_data: ReferenceDataPacket = deserialize_result.unwrap();
-
-                match reference_data.packet_type {
-                    ReferenceDataPacketType::Time => {
-                        let now_result =
-                            Self::handle_reference_time(bus, reference_data.packet_payload).await;
-
-                        if let Err(error) = now_result {
-                            error!("{}", error);
-                            return;
-                        }
-
-                        context.now_opt = Some(now_result.unwrap());
-                    }
-                    ReferenceDataPacketType::Location => {
-                        Self::handle_reference_location(bus, reference_data.packet_payload).await;
-                    }
-                    ReferenceDataPacketType::CalendarEvent => {
-                        context.unprocessed_events.push(reference_data);
-                    }
-                    ReferenceDataPacketType::SyncCompleted => {
-                        let offset_seconds = context.now_opt.unwrap().offset();
-                        bus.send_cmd(Commands::DisconnectBle);
-
-                        if context.unprocessed_events.len() > 0 {
-                            Self::handle_unprocessed_events(bus.clone(), context, offset_seconds)
-                                .await;
-                        }
-                    }
-                }
+            Events::IncomingData(_) => {
+                context.tx.send(event).await.unwrap();
             }
             _ => {}
         }
     }
 
-    async fn command_handler(bus: &BusSender, _context: &mut Context, command: Commands) {
+    async fn command_handler(bus: &BusSender, context: &mut Context, command: Commands) {
         match command {
             Commands::GetReferenceTime => {
                 bus.send_cmd(Commands::RequestReferenceData);
+            }
+            Commands::StartDeepSleep => {
+                context.tx.send(Events::Term).await.unwrap();
             }
             _ => {}
         }
@@ -122,21 +93,93 @@ impl ReferenceTime {
     pub async fn start(bus: MessageBus) {
         info!("starting...");
 
-        let context = Context {
-            now_opt: None,
-            unprocessed_events: vec![],
-        };
+        let (tx, rx) = channel::<Events>(16);
+
+        let context = Context { tx };
+
+        let message_bus = bus.clone();
+        let processing_loop_task = tokio::task::spawn_blocking(|| {
+            Self::reference_processing_loop(message_bus, rx);
+        });
 
         MessageBus::handle::<Context, Self>(bus, context).await;
+
+        processing_loop_task.await.unwrap();
 
         info!("done.");
     }
 
-    async fn handle_reference_time(
-        bus: &BusSender,
-        data: Vec<u8>,
-    ) -> Result<OffsetDateTime, Error> {
-        let deserialize_result = Self::deserialize(data).await;
+    fn reference_processing_loop(bus: MessageBus, mut rx: Receiver<Events>) {
+        let mut context = ProcessingContext {
+            now_opt: None,
+            unprocessed_events: vec![],
+        };
+
+        loop {
+            match rx.blocking_recv() {
+                Some(event) => {
+                    if matches!(event, Events::Term) {
+                        info!("received term");
+                        break;
+                    }
+
+                    Self::handle_incoming_data(&bus, &mut context, event);
+                }
+                None => {
+                    break;
+                }
+            };
+        }
+
+        info!("processing loop done.");
+    }
+
+    fn handle_incoming_data(bus: &MessageBus, context: &mut ProcessingContext, event: Events) {
+        match event {
+            Events::IncomingData(data) => {
+                let deserialize_result = rmp_serde::from_slice(&data);
+                if let Err(err) = deserialize_result {
+                    error!("{}", err);
+                    return;
+                }
+
+                let reference_data: ReferenceDataPacket = deserialize_result.unwrap();
+
+                match reference_data.packet_type {
+                    ReferenceDataPacketType::Time => {
+                        let now_result =
+                            Self::handle_reference_time(bus, reference_data.packet_payload);
+
+                        if let Err(error) = now_result {
+                            error!("{}", error);
+                            return;
+                        }
+
+                        context.now_opt = Some(now_result.unwrap());
+                    }
+                    ReferenceDataPacketType::Location => {
+                        Self::handle_reference_location(bus, reference_data.packet_payload);
+                    }
+                    ReferenceDataPacketType::CalendarEvent => {
+                        context.unprocessed_events.push(reference_data);
+                    }
+                    ReferenceDataPacketType::SyncCompleted => {
+                        let offset_seconds = context.now_opt.unwrap().offset();
+                        bus.send_cmd(Commands::DisconnectBle);
+                        if context.unprocessed_events.len() > 0 {
+                            Self::handle_unprocessed_events(bus, context, offset_seconds);
+                        }
+
+                        bus.send_event(Events::InSync(true));
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn handle_reference_time(bus: &MessageBus, data: Vec<u8>) -> Result<OffsetDateTime, Error> {
+        let deserialize_result = rmp_serde::from_slice(&data);
         if let Err(err) = deserialize_result {
             return Err(Error::from(err.to_string().as_str()));
         }
@@ -159,45 +202,35 @@ impl ReferenceTime {
         return Ok(now);
     }
 
-    async fn handle_reference_location(_bus: &BusSender, data: Vec<u8>) {
-        let deserialize_result = Self::deserialize(data).await;
+    fn handle_reference_location(_bus: &MessageBus, data: Vec<u8>) {
+        let deserialize_result = rmp_serde::from_slice(&data);
         if let Err(err) = deserialize_result {
             error!("{}", err);
             return;
         }
 
-        let _reference_location: ReferenceLocationPacket = deserialize_result.unwrap();
+        let reference_location: ReferenceLocationPacket = deserialize_result.unwrap();
+
+        info!("{:?}", reference_location)
     }
 
-    fn deserialize<TPacket>(data: Vec<u8>) -> JoinHandle<TPacket>
-    where
-        TPacket: for<'a> Deserialize<'a> + Send + 'static,
-    {
-        tokio::task::spawn_blocking(move || {
-            let data_inner = data;
-            let res = rmp_serde::from_slice(&data_inner).unwrap();
-            res
-        })
-    }
+    fn handle_unprocessed_events(
+        bus: &MessageBus,
+        context: &mut ProcessingContext,
+        offset: UtcOffset,
+    ) {
+        let events_iter: Vec<_> = context
+            .unprocessed_events
+            .drain(..)
+            .map(|x| {
+                let reference_calendar_event: ReferenceCalendarEventPacket =
+                    rmp_serde::from_slice(&x.packet_payload).unwrap();
+                CalendarEvent::new(reference_calendar_event.calendar_event, offset)
+            })
+            .collect();
 
-    async fn handle_unprocessed_events(bus: BusSender, context: &mut Context, offset: UtcOffset) {
-        let packets: Vec<_> = context.unprocessed_events.drain(..).collect();
-
-        tokio::task::spawn_blocking(move || {
-            let events_iter: Vec<_> = packets
-                .iter()
-                .map(|x| {
-                    let reference_calendar_event: ReferenceCalendarEventPacket =
-                        rmp_serde::from_slice(&x.packet_payload).unwrap();
-                    CalendarEvent::new(reference_calendar_event.calendar_event, offset)
-                })
-                .collect();
-
-            for chunk in events_iter.chunks(5) {
-                bus.send_event(Events::ReferenceCalendarEventBatch(chunk.to_vec()));
-            }
-        })
-        .await
-        .unwrap();
+        for chunk in events_iter.chunks(5) {
+            bus.send_event(Events::ReferenceCalendarEventBatch(chunk.to_vec()));
+        }
     }
 }

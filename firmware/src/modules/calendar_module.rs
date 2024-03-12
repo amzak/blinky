@@ -56,7 +56,7 @@ impl BusHandler<Context> for CalendarModule {
 
                 bus.send_event(Events::CalendarEventsBatch(batch));
             }
-            Events::BluetoothDisconnected => {
+            Events::InSync(true) => {
                 if context.calendar_events.len() == 0 {
                     return;
                 }
