@@ -57,7 +57,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 core
             );
         })
-        .thread_stack_size(15 * 1024)
+        .thread_stack_size(10 * 1024)
         .build()?;
 
     rt.block_on(main_async())?;
