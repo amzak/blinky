@@ -165,13 +165,12 @@ impl ReferenceTime {
                         context.unprocessed_events.push(reference_data);
                     }
                     ReferenceDataPacketType::SyncCompleted => {
-                        let offset_seconds = context.now_opt.unwrap().offset();
-                        bus.send_cmd(Commands::ShutdownBle);
-                        if context.unprocessed_events.len() > 0 {
-                            Self::handle_unprocessed_events(bus, context, offset_seconds);
+                        if context.now_opt.is_none() {
+                            error!("no timezone info to complete sync");
+                            return;
                         }
 
-                        bus.send_event(Events::InSync(true));
+                        Self::handle_sync_completed(context, bus);
                     }
                 }
             }
@@ -235,5 +234,15 @@ impl ReferenceTime {
                 chunk.to_vec(),
             )));
         }
+    }
+
+    fn handle_sync_completed(context: &mut ProcessingContext, bus: &MessageBus) {
+        let offset_seconds = context.now_opt.unwrap().offset();
+        bus.send_cmd(Commands::ShutdownBle);
+        if context.unprocessed_events.len() > 0 {
+            Self::handle_unprocessed_events(bus, context, offset_seconds);
+        }
+
+        bus.send_event(Events::InSync(true));
     }
 }
