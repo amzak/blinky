@@ -3,7 +3,10 @@ use esp_idf_hal::i2c::I2cDriver;
 use log::info;
 use time::{PrimitiveDateTime, UtcOffset};
 use tokio::runtime::Handle;
+use tokio::select;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
+use tokio::sync::watch;
+use tokio::time::MissedTickBehavior;
 
 use crate::peripherals::rtc::Rtc;
 
@@ -14,7 +17,7 @@ use blinky_shared::message_bus::{BusHandler, BusSender, MessageBus};
 pub struct RtcModule {}
 
 struct Context {
-    tx: Sender<Commands>,
+    tx_rtc: Sender<Commands>,
 }
 
 #[link_section = ".rtc.data"]
@@ -26,7 +29,7 @@ impl BusHandler<Context> for RtcModule {
     async fn command_handler(_bus: &BusSender, context: &mut Context, command: Commands) {
         match command {
             _ => {
-                context.tx.send(command).await.unwrap();
+                context.tx_rtc.send(command).await.unwrap();
             }
         }
     }
@@ -35,18 +38,24 @@ impl BusHandler<Context> for RtcModule {
 impl RtcModule {
     pub async fn start(proxy: I2cProxyAsync<I2cDriver<'static>>, mut bus: MessageBus) {
         info!("starting...");
-        let (tx, rx) = channel::<Commands>(10);
+        let (tx_rtc, rx_rtc) = channel::<Commands>(10);
+
+        let (tx_timer, rx_timer) = watch::channel(true);
 
         let bus_clone = bus.clone();
         let rtc_task = tokio::task::spawn_blocking(move || {
-            Self::rtc_loop(bus_clone, rx, proxy);
+            Self::rtc_loop(bus_clone, rx_rtc, tx_timer, proxy);
         });
 
-        let context = Context { tx };
+        let timer = tokio::spawn(Self::run_timer(rx_timer, tx_rtc.clone()));
+
+        let context = Context { tx_rtc };
 
         MessageBus::handle::<Context, Self>(bus, context).await;
 
         rtc_task.await.unwrap();
+
+        timer.abort();
 
         info!("done.");
     }
@@ -54,6 +63,7 @@ impl RtcModule {
     fn rtc_loop(
         bus: MessageBus,
         mut rx: Receiver<Commands>,
+        tx_timer: tokio::sync::watch::Sender<bool>,
         proxy: I2cProxyAsync<I2cDriver<'static>>,
     ) {
         let mut timezone: Option<UtcOffset> = None;
@@ -105,7 +115,14 @@ impl RtcModule {
                             UTC_OFFSET = timezone;
                         }
                     }
+                    Commands::PauseRendering => {
+                        tx_timer.send(true).unwrap();
+                    }
+                    Commands::ResumeRendering => {
+                        tx_timer.send(false).unwrap();
+                    }
                     Commands::StartDeepSleep => {
+                        tx_timer.send(true).unwrap();
                         break;
                     }
                     _ => {}
@@ -115,5 +132,31 @@ impl RtcModule {
         }
 
         info!("rtc loop done.")
+    }
+
+    async fn run_timer(pause_param: watch::Receiver<bool>, tx: Sender<Commands>) {
+        let mut pause = pause_param;
+
+        let mut interval = tokio::time::interval(core::time::Duration::from_secs(1));
+        interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
+
+        let mut pause_flag = false;
+
+        loop {
+            select! {
+                Ok(_) = pause.changed() => {
+                    let val = pause.borrow_and_update();
+                    pause_flag = *val;
+                }
+                _ = interval.tick() => {
+                    if pause_flag {
+                        info!("pause");
+                        continue;
+                    }
+
+                    tx.send(Commands::GetTimeNow).await.unwrap();
+                }
+            }
+        }
     }
 }

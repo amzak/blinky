@@ -1,9 +1,6 @@
 use blinky_shared::persistence::{PersistenceUnit, PersistenceUnitKind};
 use log::{error, info};
 use time::{Duration, OffsetDateTime, UtcOffset};
-use tokio::select;
-use tokio::sync::watch::{self, Sender};
-use tokio::time::MissedTickBehavior;
 
 use blinky_shared::commands::Commands;
 use blinky_shared::events::Events;
@@ -15,7 +12,6 @@ pub struct TimeSync {}
 struct Context {
     now: Option<OffsetDateTime>,
     sync_info: Option<RtcSyncInfo>,
-    tx: Sender<bool>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Default, Hash)]
@@ -104,16 +100,6 @@ impl BusHandler<Context> for TimeSync {
             Commands::SyncRtc => {
                 bus.send_cmd(Commands::Restore(PersistenceUnitKind::RtcSyncInfo));
             }
-            Commands::StartDeepSleep => {
-                context.tx.send(true).unwrap();
-                return;
-            }
-            Commands::PauseRendering => {
-                context.tx.send(true).unwrap();
-            }
-            Commands::ResumeRendering => {
-                context.tx.send(false).unwrap();
-            }
             _ => {}
         }
     }
@@ -123,19 +109,12 @@ impl TimeSync {
     pub async fn start(bus: MessageBus) {
         info!("starting...");
 
-        let (tx, rx) = watch::channel(true);
-
-        let timer = tokio::spawn(Self::run_timer(rx, bus.clone()));
-
         let context = Context {
             now: None,
             sync_info: None,
-            tx,
         };
 
         MessageBus::handle::<Context, Self>(bus, context).await;
-
-        timer.abort();
 
         info!("done.");
     }
@@ -164,36 +143,5 @@ impl TimeSync {
         info!("{:?} {:?}", diff, is_in_sync);
 
         is_in_sync
-    }
-
-    async fn run_timer(pause_param: watch::Receiver<bool>, bus: MessageBus) {
-        let mut pause = pause_param;
-
-        let mut interval = tokio::time::interval(core::time::Duration::from_secs(1));
-        interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
-
-        info!("before loop");
-
-        let mut pause_flag = false;
-
-        loop {
-            select! {
-                Ok(_) = pause.changed() => {
-                    let val = pause.borrow_and_update();
-                    pause_flag = *val;
-                }
-                _ = interval.tick() => {
-                    if pause_flag {
-                        info!("pause");
-                        continue;
-                    }
-
-                    info!("tick");
-
-
-                    bus.send_cmd(Commands::GetTimeNow);
-                }
-            }
-        }
     }
 }
