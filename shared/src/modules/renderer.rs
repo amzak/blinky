@@ -19,6 +19,7 @@ use crate::events::Events;
 use crate::message_bus::{BusHandler, BusSender, MessageBus};
 use embedded_graphics::primitives::{PrimitiveStyle, StyledDrawable};
 use embedded_graphics::{mono_font::MonoTextStyle, prelude::*, primitives};
+use std::borrow::Borrow;
 use std::collections::{BTreeSet, HashSet};
 use std::f32::consts::PI;
 use std::marker::PhantomData;
@@ -384,10 +385,11 @@ where
                 view_model.ble_connected = Some(false);
             }
             Events::CalendarEvent(calendar_event) => {
-                append_event(view_model, calendar_event);
+                append_event(view_model, &calendar_event);
             }
             Events::CalendarEventsBatch(batch) => {
-                for item in batch {
+                let events = batch.iter();
+                for item in events {
                     append_event(view_model, item);
                 }
             }
@@ -610,9 +612,9 @@ where
     }
 }
 
-fn append_event(view_model: &mut ViewModel, calendar_event: CalendarEvent) {
+fn append_event(view_model: &mut ViewModel, calendar_event: &CalendarEvent) {
     let old_count = view_model.calendar_events.len();
-    let updated = view_model.calendar_events.replace(calendar_event);
+    let updated = view_model.calendar_events.replace(calendar_event.clone());
     let new_count = view_model.calendar_events.len();
 
     if updated.is_some() || old_count != new_count {

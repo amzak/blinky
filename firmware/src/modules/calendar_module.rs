@@ -1,4 +1,5 @@
 use std::collections::HashSet;
+use std::sync::Arc;
 
 use crate::modules::reference_time::ReferenceTimeUtc;
 use log::{error, info, warn};
@@ -164,7 +165,7 @@ impl CalendarModule {
                         calendar_events.insert(event.clone());
                     }
 
-                    bus.send_event(Events::CalendarEventsBatch(Vec::from(chunk)));
+                    bus.send_event(Events::CalendarEventsBatch(Arc::new(Vec::from(chunk))));
                 }
             }
             Err(error) => {

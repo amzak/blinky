@@ -7,6 +7,7 @@ use blinky_shared::error::Error;
 use log::{error, info, warn};
 use serde::{Deserialize, Serialize};
 use std::ops::Add;
+use std::sync::Arc;
 use time::{OffsetDateTime, UtcOffset};
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::time::Duration;
@@ -230,7 +231,9 @@ impl ReferenceTime {
             .collect();
 
         for chunk in events_iter.chunks(5) {
-            bus.send_event(Events::ReferenceCalendarEventBatch(chunk.to_vec()));
+            bus.send_event(Events::ReferenceCalendarEventBatch(Arc::new(
+                chunk.to_vec(),
+            )));
         }
     }
 }

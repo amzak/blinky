@@ -2,6 +2,7 @@ use esp32_nimble::utilities::BleUuid;
 use esp32_nimble::{uuid128, BLEAdvertisementData, BLEDevice, NimbleProperties};
 use log::{error, info, warn};
 use std::sync::mpsc::{channel, Sender};
+use std::sync::Arc;
 
 use blinky_shared::commands::Commands;
 use blinky_shared::events::Events;
@@ -110,7 +111,7 @@ impl BleModule {
             })
             .on_write(move |args| {
                 let data = args.recv_data();
-                bus.send_event(Events::IncomingData(Vec::from(data)));
+                bus.send_event(Events::IncomingData(Arc::new(Vec::from(data))));
             });
 
         let advertising = ble_device.get_advertising();

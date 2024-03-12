@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use crate::calendar::CalendarEvent;
 use crate::domain::{ReferenceData, TouchPosition, WakeupCause};
 use crate::persistence::PersistenceUnit;
@@ -14,15 +16,15 @@ pub enum Events {
     Wakeup(WakeupCause),
     TouchOrMove,
     TouchPos(TouchPosition),
-    IncomingData(Vec<u8>),
+    IncomingData(Arc<Vec<u8>>),
     Temperature(f32),
     BatteryLevel(u16),
     Charging(bool),
     InSync(bool),
     ReferenceCalendarEvent(CalendarEvent),
-    ReferenceCalendarEventBatch(Vec<CalendarEvent>),
+    ReferenceCalendarEventBatch(Arc<Vec<CalendarEvent>>),
     CalendarEvent(CalendarEvent),
-    CalendarEventsBatch(Vec<CalendarEvent>),
+    CalendarEventsBatch(Arc<Vec<CalendarEvent>>),
     Restored(PersistenceUnit),
     Term,
 }
