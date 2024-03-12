@@ -27,7 +27,7 @@ pub struct RtcSyncInfo {
 
 impl Into<OffsetDateTime> for &RtcSyncInfo {
     fn into(self) -> OffsetDateTime {
-        let last_sync = OffsetDateTime::from_unix_timestamp(self.last_sync)
+        let last_sync = OffsetDateTime::from_unix_timestamp(self.last_sync + self.offset as i64)
             .unwrap()
             .replace_offset(UtcOffset::from_whole_seconds(self.offset).unwrap());
         last_sync
