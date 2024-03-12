@@ -18,7 +18,7 @@ impl BusHandler<Context> for BleModule {
 
     async fn command_handler(_bus: &BusSender, context: &mut Context, command: Commands) {
         match command {
-            Commands::RequestReferenceData | Commands::DisconnectBle | Commands::StartDeepSleep => {
+            Commands::RequestReferenceData | Commands::ShutdownBle | Commands::StartDeepSleep => {
                 if let Err(err) = context.tx.send(command) {
                     error!("{:?}", err);
                 }
@@ -73,13 +73,13 @@ impl BleModule {
         let bus_clone = bus.clone();
         server.on_connect(move |_server, _desc| {
             info!("client connected");
-            bus_clone.send_event(Events::BluetoothConnected);
+            bus_clone.send_event(Events::BleClientConnected);
         });
 
         let bus_clone = bus.clone();
         server.on_disconnect(move |_server, _desc| {
             info!("client disconnected");
-            bus_clone.send_event(Events::BluetoothDisconnected);
+            bus_clone.send_event(Events::BleClientDisconnected);
         });
 
         let service = server.create_service(Self::SERVICE_GUID);

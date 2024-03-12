@@ -165,7 +165,7 @@ impl ReferenceTime {
                     }
                     ReferenceDataPacketType::SyncCompleted => {
                         let offset_seconds = context.now_opt.unwrap().offset();
-                        bus.send_cmd(Commands::DisconnectBle);
+                        bus.send_cmd(Commands::ShutdownBle);
                         if context.unprocessed_events.len() > 0 {
                             Self::handle_unprocessed_events(bus, context, offset_seconds);
                         }

@@ -7,8 +7,8 @@ use time::OffsetDateTime;
 #[derive(Clone, Debug, AsRefStr)]
 pub enum Events {
     TimeNow(OffsetDateTime),
-    BluetoothConnected,
-    BluetoothDisconnected,
+    BleClientConnected,
+    BleClientDisconnected,
     ReferenceData(ReferenceData),
     ReferenceTime(OffsetDateTime),
     Wakeup(WakeupCause),

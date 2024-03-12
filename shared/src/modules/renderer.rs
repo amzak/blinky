@@ -377,10 +377,10 @@ where
             Events::Charging(is_charging) => {
                 view_model.is_charging = Some(is_charging);
             }
-            Events::BluetoothConnected => {
+            Events::BleClientConnected => {
                 view_model.ble_connected = Some(true);
             }
-            Events::BluetoothDisconnected => {
+            Events::BleClientDisconnected => {
                 view_model.ble_connected = Some(false);
             }
             Events::CalendarEvent(calendar_event) => {

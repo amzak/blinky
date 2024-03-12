@@ -29,7 +29,7 @@ struct Context {
 impl BusHandler<Context> for PowerModule {
     async fn event_handler(bus: &BusSender, context: &mut Context, event: Events) {
         match event {
-            Events::TouchOrMove | Events::BluetoothConnected => {
+            Events::TouchOrMove | Events::BleClientConnected => {
                 bus.send_cmd(Commands::ResumeRendering);
                 context.idle_reset.notify_one();
             }
