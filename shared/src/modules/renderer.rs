@@ -152,6 +152,34 @@ where
             TDisplay::FRAME_BUFFER_SIDE as u32 - top_left.x as u32 * 2,
             style,
         );
+
+        let top_left = Point::new(2, 2);
+
+        let style = PrimitiveStyle::with_stroke(TDisplay::ColorModel::YELLOW, 2);
+
+        let quater = Angle::from_degrees(90.0);
+
+        primitives::Arc::new(
+            top_left,
+            TDisplay::FRAME_BUFFER_SIDE as u32 - top_left.x as u32 * 2,
+            Angle::from_radians(2.0 * std::f32::consts::PI * 5.0 / (60.0 * 12.0)) - quater,
+            Angle::from_radians(2.0 * std::f32::consts::PI * 10.0 / (60.0 * 12.0)),
+        )
+        .into_styled(style)
+        .draw(frame)
+        .unwrap();
+
+        let style = PrimitiveStyle::with_stroke(TDisplay::ColorModel::RED, 2);
+
+        primitives::Arc::new(
+            top_left,
+            TDisplay::FRAME_BUFFER_SIDE as u32 - top_left.x as u32 * 2,
+            Angle::zero() - quater,
+            Angle::from_radians(2.0 * std::f32::consts::PI * 5.0 / (60.0 * 12.0)),
+        )
+        .into_styled(style)
+        .draw(frame)
+        .unwrap();
     }
 
     fn render_time(frame: &mut TDisplay::FrameBuffer<'_>, vm: &ViewModel) -> primitives::Rectangle {
