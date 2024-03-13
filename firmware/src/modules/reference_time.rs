@@ -94,7 +94,7 @@ impl ReferenceTime {
     pub async fn start(bus: MessageBus) {
         info!("starting...");
 
-        let (tx, rx) = channel::<Events>(16);
+        let (tx, rx) = channel::<Events>(30);
 
         let context = Context { tx };
 
