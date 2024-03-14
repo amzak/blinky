@@ -86,6 +86,10 @@ impl<TDisplay> BusHandler<Context> for Renderer<TDisplay> {
             return;
         }
 
+        if !Self::is_renderable(&event) {
+            return;
+        }
+
         context.tx.send(event).await.unwrap();
     }
 
@@ -101,6 +105,24 @@ impl<TDisplay> BusHandler<Context> for Renderer<TDisplay> {
                 context.tx.send(Events::Term).await.unwrap();
             }
             _ => {}
+        }
+    }
+}
+
+impl<TDisplay> Renderer<TDisplay> {
+    fn is_renderable(event: &Events) -> bool {
+        match event {
+            Events::TimeNow(_)
+            | Events::Temperature(_)
+            | Events::BatteryLevel(_)
+            | Events::Charging(_)
+            | Events::BleClientConnected
+            | Events::BleClientDisconnected
+            | Events::CalendarEvent(_)
+            | Events::CalendarEventsBatch(_) => {
+                return true;
+            }
+            _ => false,
         }
     }
 }
@@ -351,48 +373,34 @@ where
             force_update_events: true,
         };
 
-        let mut full_break = false;
-
+        let mut state_changed = false;
         loop {
-            loop {
-                let event_opt = match rx.try_recv() {
-                    Ok(event) => Some(event),
-                    Err(err) => match err {
-                        tokio::sync::mpsc::error::TryRecvError::Empty => {
-                            Self::render(&mut display, &mut state);
-                            rx.blocking_recv()
-                        }
-                        tokio::sync::mpsc::error::TryRecvError::Disconnected => {
-                            full_break = true;
-                            None
-                        }
-                    },
-                };
+            let event_opt = match rx.try_recv() {
+                Ok(event) => Some(event),
+                Err(err) => match err {
+                    tokio::sync::mpsc::error::TryRecvError::Empty => {
+                        Self::render(&mut display, &mut state);
+                        rx.blocking_recv()
+                    }
+                    tokio::sync::mpsc::error::TryRecvError::Disconnected => break,
+                },
+            };
 
-                if event_opt.is_none() {
-                    full_break = true;
-                    break;
-                }
+            let event = event_opt.unwrap();
 
-                let event = event_opt.unwrap();
-
-                if matches!(event, Events::Term) {
-                    full_break = true;
-                    break;
-                }
-
-                Self::apply_change(event, &mut state);
-            }
-
-            if full_break {
+            if matches!(event, Events::Term) {
                 break;
             }
+
+            state_changed |= Self::try_apply_change(event, &mut state);
         }
 
         info!("renderer loop done");
     }
 
-    fn apply_change(event: Events, view_model: &mut ViewModel) {
+    fn try_apply_change(event: Events, view_model: &mut ViewModel) -> bool {
+        let mut state_changed = true;
+
         match event {
             Events::TimeNow(now) => {
                 view_model.time = Some(now);
@@ -421,12 +429,16 @@ where
                     append_event(view_model, item);
                 }
             }
-            _ => {}
+            _ => {
+                state_changed = false;
+            }
         }
 
         if let Some(now) = view_model.time {
             view_model.calendar_events.retain(|x| x.end >= now);
         }
+
+        return state_changed;
     }
 
     fn render(display: &mut TDisplay, vm: &mut ViewModel) {
