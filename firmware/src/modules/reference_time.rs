@@ -1,7 +1,7 @@
 use blinky_shared::calendar::CalendarEvent;
 use blinky_shared::contract::packets::{
-    ReferenceCalendarEventPacket, ReferenceDataPacket, ReferenceDataPacketType,
-    ReferenceLocationPacket, ReferenceTimePacket,
+    CalendarEventsMetaPacket, ReferenceCalendarEventPacket, ReferenceDataPacket,
+    ReferenceDataPacketType, ReferenceLocationPacket, ReferenceTimePacket,
 };
 use blinky_shared::error::Error;
 use log::{error, info, warn};
@@ -26,6 +26,7 @@ pub struct Context {
 pub struct ProcessingContext {
     now_opt: Option<OffsetDateTime>,
     unprocessed_events: Vec<ReferenceDataPacket>,
+    expect_events_count: u16,
 }
 
 #[derive(Debug, Deserialize, PartialEq, Clone)]
@@ -114,6 +115,7 @@ impl ReferenceTime {
         let mut context = ProcessingContext {
             now_opt: None,
             unprocessed_events: vec![],
+            expect_events_count: 0,
         };
 
         loop {
@@ -163,14 +165,27 @@ impl ReferenceTime {
                     }
                     ReferenceDataPacketType::CalendarEvent => {
                         context.unprocessed_events.push(reference_data);
+
+                        if context.expect_events_count > 0
+                            && context.expect_events_count as usize
+                                == context.unprocessed_events.len()
+                        {
+                            Self::handle_sync_completed(context, bus);
+                        }
                     }
-                    ReferenceDataPacketType::SyncCompleted => {
-                        if context.now_opt.is_none() {
-                            error!("no timezone info to complete sync");
+                    ReferenceDataPacketType::CalendarEventsMeta => {
+                        let deserialize_result =
+                            rmp_serde::from_slice(&reference_data.packet_payload);
+                        if let Err(err) = deserialize_result {
+                            error!("{}", err);
                             return;
                         }
 
-                        Self::handle_sync_completed(context, bus);
+                        let events_meta: CalendarEventsMetaPacket = deserialize_result.unwrap();
+
+                        context.expect_events_count = events_meta.events_count;
+
+                        info!("expecting {} events", context.expect_events_count);
                     }
                 }
             }

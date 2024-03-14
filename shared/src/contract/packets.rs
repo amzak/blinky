@@ -12,7 +12,7 @@ pub enum ReferenceDataPacketType {
     Time = 1,
     Location = 2,
     CalendarEvent = 3,
-    SyncCompleted = 100,
+    CalendarEventsMeta = 4,
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
@@ -38,4 +38,9 @@ pub struct ReferenceLocationPacket {
 #[derive(Debug, Deserialize, PartialEq, Clone)]
 pub struct ReferenceCalendarEventPacket {
     pub calendar_event: CalendarEventDto,
+}
+
+#[derive(Debug, Deserialize, PartialEq, Clone)]
+pub struct CalendarEventsMetaPacket {
+    pub events_count: u16,
 }
