@@ -65,7 +65,7 @@ async fn main_async() -> Result<(), Box<dyn std::error::Error>> {
         message_bus.send_event(Events::TimeNow(now));
         message_bus.send_cmd(Commands::ResumeRendering);
         message_bus.send_event(Events::BatteryLevel(80));
-        message_bus.send_event(Events::BluetoothConnected);
+        message_bus.send_event(Events::BleClientConnected);
         message_bus.send_event(Events::Temperature(20.0));
 
         message_bus.send_event(Events::CalendarEvent(CalendarEvent {
