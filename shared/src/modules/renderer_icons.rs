@@ -51,6 +51,11 @@ pub fn render_event_icon<TDisplay: ClockDisplayInterface>(
         CalendarEventIcon::Car => {
             Graphics::<TDisplay>::icon_center(frame, center, &small_mdi_icons::Car::new(color))
         }
+        CalendarEventIcon::Rain => Graphics::<TDisplay>::icon_center(
+            frame,
+            center,
+            &small_mdi_icons::WeatherRainy::new(color),
+        ),
         _ => {
             Graphics::<TDisplay>::icon_center(frame, center, &small_mdi_icons::Calendar::new(color))
         }

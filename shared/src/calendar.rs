@@ -15,6 +15,7 @@ pub enum CalendarEventIcon {
     Bus = 4,
     Train = 5,
     Car = 6,
+    Rain = 7,
 }
 
 #[derive(Clone, Debug)]
