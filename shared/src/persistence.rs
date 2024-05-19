@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 use strum_macros::AsRefStr;
+use tokio::task::JoinError;
 
 use crate::error::Error;
 
@@ -60,15 +61,19 @@ impl PersistenceUnit {
 
         let data_arc_clone = data_arc.clone();
 
-        let result = tokio::spawn(async move {
-            let slice = data_arc_clone.as_slice();
-            let res = rmp_serde::from_slice::<T>(slice).unwrap();
+        let result: Result<Result<T, rmp_serde::decode::Error>, JoinError> =
+            tokio::spawn(async move {
+                let slice = data_arc_clone.as_slice();
+                let res = rmp_serde::from_slice::<T>(slice);
 
-            res
-        })
-        .await;
+                res
+            })
+            .await;
 
-        result.map_err(|err| Error::from(err.to_string().as_str()))
+        match result {
+            Ok(deserialize_res) => deserialize_res.map_err(|err| Error::from(err.to_string())),
+            Err(err) => Result::Err(Error::from(err.to_string())),
+        }
     }
 }
 
