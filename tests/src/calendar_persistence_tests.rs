@@ -1,5 +1,5 @@
 use blinky_shared::{
-    calendar::CalendarEventDto,
+    calendar::{CalendarEventDto, CalendarKind},
     domain::ReferenceTimeUtc,
     persistence::{PersistenceUnit, PersistenceUnitKind},
 };
@@ -14,8 +14,8 @@ struct CalendarEventDto_OldVersion {
     pub end: ReferenceTimeUtc,
 }
 
-#[test]
-fn should_serialize_and_deserialize_persistence_unit() {
+#[tokio::test]
+async fn should_serialize_and_deserialize_persistence_unit() {
     let event = CalendarEventDto {
         id: 1,
         title: "qqq".to_string(),
@@ -23,11 +23,12 @@ fn should_serialize_and_deserialize_persistence_unit() {
         end: OffsetDateTime::now_utc().into(),
         icon: blinky_shared::calendar::CalendarEventIcon::Default,
         color: 0,
+        kind: CalendarKind::Phone,
     };
 
     let persistence_unit = PersistenceUnit::new(PersistenceUnitKind::CalendarSyncInfo, &event);
 
-    let result: CalendarEventDto = persistence_unit.deserialize().unwrap();
+    let result: CalendarEventDto = persistence_unit.deserialize().await.unwrap();
 
     assert_eq!(result, event);
 }

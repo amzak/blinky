@@ -10,3 +10,4 @@ rmp-serde = "1.1.2"
 serde = { version = "1.0.159", default-features = false, features = ["derive"] }
 time = { version = "0.3.20", features = ["macros", "serde", "formatting", "local-offset"] }
 blinky-shared = { path = "../shared" }
+tokio = { version = "1.36.0", features = ["rt-multi-thread", "sync", "time", "macros"] }
