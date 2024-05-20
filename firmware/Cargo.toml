@@ -29,7 +29,7 @@ embassy = ["esp-idf-svc/embassy-sync", "esp-idf-svc/critical-section", "esp-idf-
 #socket2 = { git = "https://github.com/rust-lang/socket2", branch = "master" }
 
 [dependencies]
-esp-idf-sys = { version = "0.34.0", features = ["binstart"] }
+esp-idf-sys = { version = "0.34.1", features = ["binstart"] }
 esp-idf-hal = { version = "0.43.0", features = ["alloc"], default-features = false }
 esp-idf-svc = "0.48.0"
 mipidsi = { git = "https://github.com/almindor/mipidsi.git", branch = "master" }
