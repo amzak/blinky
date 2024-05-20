@@ -1,5 +1,5 @@
 use crate::peripherals::i2c_proxy_async::I2cProxyAsync;
-use crate::peripherals::touchpad::TouchpadConfig;
+use crate::peripherals::touchpad::{Touchpad, TouchpadConfig};
 use esp_idf_hal::i2c::I2cDriver;
 use log::info;
 
@@ -11,6 +11,10 @@ use blinky_shared::message_bus::{BusHandler, BusSender, ContextStub, MessageBus}
 pub struct TouchPosition {
     pub x: i32,
     pub y: i32,
+}
+
+struct Context<'a> {
+    touchpad: Touchpad<'a>,
 }
 
 pub struct TouchModule {}
@@ -43,7 +47,7 @@ impl TouchModule {
     ) {
         info!("starting...");
 
-        //let touchpad = Touchpad::create(proxy, config);
+        let touchpad = Touchpad::create(proxy, config);
 
         MessageBus::handle::<ContextStub, Self>(bus, ContextStub {}).await;
 
