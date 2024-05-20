@@ -1,5 +1,9 @@
 use embedded_graphics::image::Image;
+use embedded_graphics::mono_font::ascii::FONT_6X10;
 use embedded_graphics::pixelcolor::raw::RawU16;
+use embedded_graphics::pixelcolor::Rgb565;
+use embedded_graphics::text::renderer::CharacterStyle;
+use embedded_graphics::text::Text;
 use embedded_graphics_framebuf::FrameBuf;
 use time::{Duration, OffsetDateTime, Time};
 
@@ -7,28 +11,29 @@ use time::macros::format_description;
 
 use log::{debug, info};
 
-use embedded_icon::mdi::{size12px, size18px};
+use embedded_icon::mdi::size12px::{self};
 use embedded_icon::prelude::*;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 
-use crate::calendar::CalendarEvent;
 use crate::calendar::CalendarEventIcon;
+use crate::calendar::{CalendarEvent, CalendarEventKey};
 use crate::commands::Commands;
 use crate::display_interface::{ClockDisplayInterface, LayerType, RenderMode};
 use crate::events::Events;
 use crate::message_bus::{BusHandler, BusSender, MessageBus};
 use embedded_graphics::primitives::{PrimitiveStyle, StyledDrawable};
 use embedded_graphics::{mono_font::MonoTextStyle, prelude::*, primitives};
-use std::borrow::Borrow;
 use std::collections::{BTreeSet, HashSet};
 use std::f32::consts::PI;
 use std::marker::PhantomData;
-use std::ops::Add;
+use std::sync::Arc;
 use u8g2_fonts::{fonts, U8g2TextStyle};
 
 use super::graphics::Graphics;
 use super::renderer_icons::render_battery_level_icon;
 use super::renderer_icons::render_event_icon;
+
+pub const HALF_DAY: Duration = Duration::hours(12);
 
 pub struct Renderer<TDisplay> {
     _inner: PhantomData<TDisplay>,
@@ -39,7 +44,12 @@ struct Context {
     pause: bool,
 }
 
-pub struct ViewModel {
+enum VisualMode {
+    Normal,
+    Details,
+}
+
+struct ViewModel {
     is_charging: Option<bool>,
     battery_level: Option<u16>,
     ble_connected: Option<bool>,
@@ -47,7 +57,10 @@ pub struct ViewModel {
     time: Option<OffsetDateTime>,
     calendar_events: BTreeSet<CalendarEvent>,
 
-    force_update_events: bool,
+    should_update_events: bool,
+    should_reset_events: bool,
+
+    mode: VisualMode,
 }
 
 struct EventTagStyle<TColor> {
@@ -74,7 +87,7 @@ impl<TColor> EventTagStyle<TColor> {
             color,
             event_tag_size: 25,
             icon,
-            length: 35,
+            length: 60,
             thickness: 1,
         }
     }
@@ -119,7 +132,9 @@ impl<TDisplay> Renderer<TDisplay> {
             | Events::BleClientConnected
             | Events::BleClientDisconnected
             | Events::CalendarEvent(_)
-            | Events::CalendarEventsBatch(_) => {
+            | Events::CalendarEventsBatch(_)
+            | Events::DropCalendarEventsBatch(_)
+            | Events::Key1Press => {
                 return true;
             }
             _ => false,
@@ -162,12 +177,35 @@ where
         Self::draw_arrow(frame, vm);
     }
 
-    fn render_static(
+    fn render_clock_face(
         frame: &mut <TDisplay as ClockDisplayInterface>::FrameBuffer<'_>,
         vm: &mut ViewModel,
     ) {
-        let style = PrimitiveStyle::with_stroke(TDisplay::ColorModel::WHITE, 1);
-        let top_left = Point::new(3, 3);
+        let width = 40;
+        let half_width = width / 2;
+        let style = PrimitiveStyle::with_stroke(
+            TDisplay::ColorModel::from(Rgb565::CSS_DARK_SLATE_GRAY.into()),
+            width,
+        );
+        let top_left = Point::new(half_width as i32, half_width as i32);
+
+        Graphics::<TDisplay>::circle(
+            frame,
+            top_left,
+            TDisplay::FRAME_BUFFER_SIDE as u32 - top_left.x as u32 * 2,
+            style,
+        );
+
+        let top_left = Point::new(width as i32, width as i32);
+
+        let width = 5;
+        let half_width = width / 2;
+
+        let style = PrimitiveStyle::with_stroke(
+            TDisplay::ColorModel::from(Rgb565::CSS_LIGHT_SLATE_GRAY.into()),
+            width,
+        );
+
         Graphics::<TDisplay>::circle(
             frame,
             top_left,
@@ -204,6 +242,49 @@ where
         .unwrap();
     }
 
+    fn render_clock_face_marks(
+        frame: &mut <TDisplay as ClockDisplayInterface>::FrameBuffer<'_>,
+        vm: &mut ViewModel,
+    ) where
+        TDisplay: ClockDisplayInterface,
+    {
+        const INTERVAL: Duration = Duration::minutes(30);
+        const MAX_POS: Duration = HALF_DAY;
+
+        let mut pos = Duration::ZERO;
+
+        let radius: f32 = (TDisplay::FRAME_BUFFER_SIDE / 2) as f32;
+        let length: f32 = 10.0;
+
+        let mut style = PrimitiveStyle::with_stroke(TDisplay::ColorModel::BLACK, 1);
+
+        while pos < MAX_POS {
+            style.stroke_width = 2;
+
+            if pos == Duration::hours(0)
+                || pos == Duration::hours(3)
+                || pos == Duration::hours(6)
+                || pos == Duration::hours(9)
+            {
+                style.stroke_width = 3;
+            }
+
+            let angle = (pos.whole_seconds() as f32 / MAX_POS.whole_seconds() as f32)
+                * std::f32::consts::PI
+                * 2.0;
+
+            Self::draw_radial_line::<TDisplay::ColorModel>(
+                frame,
+                Angle::from_radians(angle),
+                radius,
+                length,
+                style,
+            );
+
+            pos += INTERVAL;
+        }
+    }
+
     fn render_time(frame: &mut TDisplay::FrameBuffer<'_>, vm: &ViewModel) -> primitives::Rectangle {
         let time_template = format_description!(version = 2, "[hour repr:24]:[minute]:[second]");
 
@@ -212,7 +293,7 @@ where
 
         let time_as_text = vm.time.unwrap().format(&time_template).unwrap();
 
-        let position = Point::new(120 - 10, 120);
+        let position = Point::new(120, 120);
 
         Graphics::<TDisplay>::text_aligned(
             frame,
@@ -236,14 +317,14 @@ where
 
         let half_width = time_text_bounds.size.width as i32 / 2;
 
-        let top_left = Point::new(120 + half_width + 10, 120);
+        let top_left = Point::new(half_width + 119, 140);
 
         Graphics::<TDisplay>::text_aligned(
             frame,
             &day_as_text,
             top_left,
             day_text_style,
-            embedded_graphics::text::Alignment::Center,
+            embedded_graphics::text::Alignment::Right,
         );
     }
 
@@ -315,14 +396,14 @@ where
         Graphics::<TDisplay>::text_aligned(
             frame,
             &text,
-            Point::new(120, 140),
+            Point::new(124, 140),
             style_time,
             embedded_graphics::text::Alignment::Center,
         );
     }
 
     pub fn render_battery_level(frame: &mut TDisplay::FrameBuffer<'_>, vm: &ViewModel) {
-        let point = Point::new(120, 205);
+        let point = Point::new(120, 180);
 
         if let Some(is_charging) = vm.is_charging {
             if is_charging {
@@ -355,9 +436,9 @@ where
 
         let is_ble_connected = vm.ble_connected.unwrap();
         if is_ble_connected {
-            let icon = size18px::Bluetooth::new(TDisplay::ColorModel::WHITE);
+            let icon = size12px::BluetoothTransfer::new(TDisplay::ColorModel::WHITE);
 
-            Graphics::<TDisplay>::icon(frame, Point::new(120 - 18 / 2, 15), &icon);
+            Graphics::<TDisplay>::icon(frame, Point::new(120 - 60, 130), &icon);
         };
     }
 
@@ -370,7 +451,9 @@ where
             temperature: None,
             time: None,
             calendar_events: BTreeSet::new(),
-            force_update_events: true,
+            should_update_events: true,
+            should_reset_events: false,
+            mode: VisualMode::Normal,
         };
 
         let mut state_changed = false;
@@ -429,6 +512,16 @@ where
                     append_event(view_model, item);
                 }
             }
+            Events::DropCalendarEventsBatch(batch) => {
+                drop_events(view_model, batch);
+            }
+            Events::Key1Press => {
+                view_model.mode = if matches!(view_model.mode, VisualMode::Normal) {
+                    VisualMode::Details
+                } else {
+                    VisualMode::Normal
+                }
+            }
             _ => {
                 state_changed = false;
             }
@@ -443,16 +536,24 @@ where
 
     fn render(display: &mut TDisplay, vm: &mut ViewModel) {
         display.render(LayerType::Static, RenderMode::Invalidate, |mut frame| {
-            Self::render_static(&mut frame, vm);
+            Self::render_clock_face(&mut frame, vm);
+            Self::render_clock_face_marks(&mut frame, vm);
 
             frame
         });
 
         display.render(LayerType::Clock, RenderMode::Invalidate, |mut frame| {
-            Self::render_battery_level(&mut frame, vm);
-            Self::render_ble_connected(&mut frame, vm);
-            Self::render_datetime(&mut frame, vm);
-            Self::render_temperature(&mut frame, vm);
+            match vm.mode {
+                VisualMode::Normal => {
+                    Self::render_battery_level(&mut frame, vm);
+                    Self::render_ble_connected(&mut frame, vm);
+                    Self::render_datetime(&mut frame, vm);
+                    Self::render_temperature(&mut frame, vm);
+                }
+                VisualMode::Details => {
+                    Self::render_current_events_details(&mut frame, vm);
+                }
+            }
 
             frame
         });
@@ -465,25 +566,70 @@ where
         display.commit();
     }
 
+    fn render_current_events_details(frame: &mut TDisplay::FrameBuffer<'_>, vm: &mut ViewModel) {
+        let now = vm.time.unwrap();
+
+        let current_events = vm
+            .calendar_events
+            .iter()
+            .filter(|x| x.start <= now && x.end > now);
+
+        let mut style_underline = MonoTextStyle::new(&FONT_6X10, TDisplay::ColorModel::WHITE);
+        style_underline.set_underline_color(embedded_graphics::text::DecorationColor::TextColor);
+
+        let style = MonoTextStyle::new(&FONT_6X10, TDisplay::ColorModel::WHITE);
+
+        let center = Point::new_equal(TDisplay::FRAME_BUFFER_SIDE as i32 / 2);
+
+        let mut correction: i32 = 0;
+
+        for (index, event) in current_events.enumerate() {
+            Text::with_alignment(
+                event.title.as_str(),
+                Point::new(0, -20 + ((index as i32 + correction) * 2) * 12) + center,
+                style_underline,
+                embedded_graphics::text::Alignment::Center,
+            )
+            .draw(frame)
+            .unwrap();
+
+            if event.description.is_empty() {
+                correction -= 1;
+                continue;
+            }
+
+            Text::with_alignment(
+                event.description.as_str(),
+                Point::new(0, -20 + ((index as i32 + correction) * 2 + 1) * 12) + center,
+                style,
+                embedded_graphics::text::Alignment::Center,
+            )
+            .draw(frame)
+            .unwrap();
+        }
+    }
+
     fn render_events(frame: &mut TDisplay::FrameBuffer<'_>, vm: &mut ViewModel) {
         if vm.time.is_none() {
             return;
         }
 
-        if !vm.force_update_events {
+        if !(vm.should_update_events || vm.should_reset_events) {
             return;
+        }
+
+        if vm.should_reset_events {
+            frame.clear(TDisplay::ColorModel::default()).unwrap();
         }
 
         let now = vm.time.unwrap();
 
-        let half_day = Duration::hours(12);
-
         debug!("rendering {} events...", vm.calendar_events.len());
 
-        const EVENT_TAG_SIZE: usize = 18;
+        //const EVENT_TAG_SIZE: usize = 18;
 
-        let mut template_buf = [TDisplay::ColorModel::BLACK; EVENT_TAG_SIZE * EVENT_TAG_SIZE];
-        let mut fbuff = FrameBuf::new(&mut template_buf, EVENT_TAG_SIZE, EVENT_TAG_SIZE);
+        //let mut template_buf = [TDisplay::ColorModel::BLACK; EVENT_TAG_SIZE * EVENT_TAG_SIZE];
+        //let mut fbuff = FrameBuf::new(&mut template_buf, EVENT_TAG_SIZE, EVENT_TAG_SIZE);
 
         // Self::draw_event_tag_template(
         //     &mut fbuff,
@@ -491,60 +637,61 @@ where
         //     EVENT_TAG_SIZE as u32,
         // );
 
-        for event in vm.calendar_events.iter() {
-            if event.end - event.start >= half_day {
-                continue;
-            }
+        let current_events = vm
+            .calendar_events
+            .iter()
+            .filter(|x| x.start <= now && x.end > now);
 
-            if event.start - now > half_day {
-                continue;
-            }
+        let current_finite_events = current_events.clone().filter(|x| x.end - now <= HALF_DAY);
 
-            Self::render_event(frame, &event, &now, &template_buf);
-        }
+        Self::render_current_finite_events(current_finite_events, frame, &now);
 
-        vm.force_update_events = false;
+        let current_ambient_events: Vec<&CalendarEvent> =
+            current_events.filter(|x| x.end - now > HALF_DAY).collect();
+
+        Self::render_currrent_ambient_events(frame, current_ambient_events);
+
+        let today_events = vm.calendar_events.iter().filter(|x| {
+            (x.start > now) && (x.end - x.start) < HALF_DAY && (x.start - now) < HALF_DAY
+        });
+
+        Self::render_todays_events(today_events, frame, &now);
+
+        vm.should_update_events = false;
     }
 
-    fn render_event(
+    fn render_currrent_ambient_events<'a>(
+        frame: &mut TDisplay::FrameBuffer<'_>,
+        events: Vec<&CalendarEvent>,
+    ) {
+        let count = events.len();
+
+        for (index, event) in events.iter().enumerate() {
+            Self::render_current_ambient_event(frame, event, index, count);
+        }
+    }
+
+    fn render_current_ambient_event(
         frame: &mut TDisplay::FrameBuffer<'_>,
         event: &CalendarEvent,
-        now_ref: &OffsetDateTime,
-        template_buf: &[TDisplay::ColorModel; 18 * 18],
+        index: usize,
+        count: usize,
     ) {
-        let now = *now_ref;
-
-        let mut current_event = true;
-
-        let mut event_start_rel = Duration::ZERO;
-
-        if event.start > now {
-            event_start_rel = event.start - now;
-            current_event = false;
+        if count > 2 {
+            // ?
         }
 
-        let half_a_day = Duration::hours(12);
+        let radius = 60.0;
+        let angle = Angle::from_degrees(35.0 - 70.0 * index as f32);
 
-        let event_end_rel = if event.end > now.add(half_a_day) {
-            half_a_day
-        } else {
-            event.end - now
-        };
+        let (sin, cos) = (Angle::from_radians(std::f32::consts::PI) - angle)
+            .to_radians()
+            .sin_cos();
 
-        let start_angle = Angle::from_radians(
-            (event_start_rel.whole_minutes() as f32 / half_a_day.whole_minutes() as f32) * PI * 2.0,
+        let p1 = Point::new(
+            TDisplay::FRAME_BUFFER_SIDE as i32 / 2 + (radius * (sin)) as i32,
+            TDisplay::FRAME_BUFFER_SIDE as i32 / 2 + (radius * (cos)) as i32,
         );
-
-        let end_angle = Angle::from_radians(
-            (event_end_rel.whole_minutes() as f32 / half_a_day.whole_minutes() as f32) * PI * 2.0,
-        );
-
-        debug!(
-            "event {} - {} {:?} - {:?} {:?} - {:?}",
-            event.start, event.end, event_start_rel, event_end_rel, start_angle, end_angle
-        );
-
-        let angle_sweep = end_angle - start_angle;
 
         let color = if event.color == 0 {
             TDisplay::ColorModel::WHITE
@@ -552,7 +699,109 @@ where
             TDisplay::ColorModel::from(RawU16::from_u32(event.color))
         };
 
-        let style = PrimitiveStyle::with_stroke(color, 2);
+        let style = EventTagStyle::large(event.icon, color);
+
+        Self::draw_event_tag(frame, p1, style)
+    }
+
+    fn render_current_finite_events<'a>(
+        events: impl Iterator<Item = &'a CalendarEvent>,
+        frame: &mut TDisplay::FrameBuffer<'_>,
+        now: &OffsetDateTime,
+    ) {
+        for event in events {
+            Self::render_current_finite_event(frame, &event, &now);
+        }
+    }
+
+    fn render_current_finite_event(
+        frame: &mut TDisplay::FrameBuffer<'_>,
+        event: &CalendarEvent,
+        now_ref: &OffsetDateTime,
+    ) {
+        let now = *now_ref;
+
+        let color = if event.color == 0 {
+            TDisplay::ColorModel::WHITE
+        } else {
+            TDisplay::ColorModel::from(RawU16::from_u32(event.color))
+        };
+
+        Self::render_time_range_arc(frame, &now, &event.start, &event.end, color);
+
+        let event_start_rel = Duration::ZERO;
+
+        let start_angle = Angle::from_radians(
+            (event_start_rel.whole_minutes() as f32 / HALF_DAY.whole_minutes() as f32) * PI * 2.0,
+        );
+
+        let style = EventTagStyle::large(event.icon, color);
+
+        Self::draw_event(frame, start_angle, style);
+    }
+
+    fn render_todays_events<'a>(
+        events: impl Iterator<Item = &'a CalendarEvent>,
+        frame: &mut TDisplay::FrameBuffer<'_>,
+        now: &OffsetDateTime,
+    ) {
+        for event in events {
+            Self::render_todays_event(frame, &event, &now);
+        }
+    }
+
+    fn render_todays_event(
+        frame: &mut TDisplay::FrameBuffer<'_>,
+        event: &CalendarEvent,
+        now_ref: &OffsetDateTime,
+    ) {
+        let now = *now_ref;
+
+        let color = if event.color == 0 {
+            TDisplay::ColorModel::WHITE
+        } else {
+            TDisplay::ColorModel::from(RawU16::from_u32(event.color))
+        };
+
+        Self::render_time_range_arc(frame, &now, &event.start, &event.end, color);
+
+        let event_start_rel = event.start - now;
+
+        let start_angle = Angle::from_radians(
+            (event_start_rel.whole_minutes() as f32 / HALF_DAY.whole_minutes() as f32) * PI * 2.0,
+        );
+
+        let style = EventTagStyle::default(event.icon, color);
+
+        Self::draw_event(frame, start_angle, style);
+    }
+
+    fn render_time_range_arc(
+        frame: &mut TDisplay::FrameBuffer<'_>,
+        now: &OffsetDateTime,
+        start: &OffsetDateTime,
+        end: &OffsetDateTime,
+        color: TDisplay::ColorModel,
+    ) {
+        let event_start_rel = if start > now {
+            *start - *now
+        } else {
+            Duration::ZERO
+        };
+
+        let event_end_rel = *end - *now;
+
+        let start_angle = Angle::from_radians(
+            (event_start_rel.whole_minutes() as f32 / HALF_DAY.whole_minutes() as f32) * PI * 2.0,
+        );
+
+        let end_angle = Angle::from_radians(
+            (event_end_rel.whole_minutes() as f32 / HALF_DAY.whole_minutes() as f32) * PI * 2.0,
+        );
+
+        let angle_sweep = end_angle - start_angle;
+
+        let style = PrimitiveStyle::with_stroke(color, 4);
 
         let three_quaters = Angle::from_degrees(90.0);
         let start = start_angle - three_quaters;
@@ -572,27 +821,16 @@ where
             .draw(frame)
             .unwrap();
         }
-
-        let style = if current_event {
-            EventTagStyle::default(event.icon, color)
-        } else {
-            EventTagStyle::large(event.icon, color)
-        };
-
-        Self::draw_event(frame, start_angle, style);
     }
 
     fn draw_event(
         frame: &mut TDisplay::FrameBuffer<'_>,
         angle: Angle,
-        style: EventTagStyle<TDisplay::ColorModel>,
+        event_style: EventTagStyle<TDisplay::ColorModel>,
     ) {
         let initial_radius: f32 = TDisplay::FRAME_BUFFER_SIDE as f32 / 2.0;
-        let length = style.length as f32;
-        let thickness = style.thickness as u32;
-        let event_tag_size = style.event_tag_size as u32;
-        let icon = style.icon;
-        let color = style.color;
+        let length = event_style.length as f32;
+        let thickness = event_style.thickness as u32;
 
         let style = PrimitiveStyle::with_stroke(TDisplay::ColorModel::WHITE, thickness);
 
@@ -604,14 +842,27 @@ where
             style,
         );
 
+        Self::draw_event_tag(frame, end_point, event_style);
+    }
+
+    fn draw_event_tag(
+        frame: &mut TDisplay::FrameBuffer<'_>,
+        point: Point,
+        style: EventTagStyle<TDisplay::ColorModel>,
+    ) {
+        let thickness = style.thickness as u32;
+        let event_tag_size = style.event_tag_size as u32;
+        let icon = style.icon;
+        let color = style.color;
+
         let mut solid_style = PrimitiveStyle::with_stroke(TDisplay::ColorModel::WHITE, thickness);
         solid_style.fill_color = Some(TDisplay::ColorModel::BLACK);
 
-        primitives::Circle::with_center(end_point, event_tag_size)
+        primitives::Circle::with_center(point, event_tag_size)
             .draw_styled(&solid_style, frame)
             .unwrap();
 
-        render_event_icon::<TDisplay>(frame, icon, end_point, 12, color);
+        render_event_icon::<TDisplay>(frame, icon, point, 12, color);
     }
 
     fn draw_event_tag_template(
@@ -658,6 +909,26 @@ fn append_event(view_model: &mut ViewModel, calendar_event: &CalendarEvent) {
     let new_count = view_model.calendar_events.len();
 
     if updated.is_some() || old_count != new_count {
-        view_model.force_update_events = true;
+        view_model.should_update_events = true;
+    }
+}
+
+fn drop_events(view_model: &mut ViewModel, events_keys: Arc<Vec<CalendarEventKey>>) {
+    let old_count = view_model.calendar_events.len();
+
+    let mut set: HashSet<CalendarEventKey> = HashSet::new();
+
+    for event_key in events_keys.iter() {
+        set.insert(event_key.clone());
+    }
+
+    view_model
+        .calendar_events
+        .retain(|x| !set.contains(&x.key()));
+
+    let new_count = view_model.calendar_events.len();
+
+    if old_count != new_count {
+        view_model.should_reset_events = true;
     }
 }

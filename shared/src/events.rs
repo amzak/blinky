@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::calendar::CalendarEvent;
+use crate::calendar::{CalendarEvent, CalendarEventKey};
 use crate::domain::{ReferenceData, TouchPosition, WakeupCause};
 use crate::persistence::PersistenceUnit;
 use strum_macros::AsRefStr;
@@ -15,6 +15,7 @@ pub enum Events {
     ReferenceTime(OffsetDateTime),
     Wakeup(WakeupCause),
     TouchOrMove,
+    Key1Press,
     TouchPos(TouchPosition),
     IncomingData(Arc<Vec<u8>>),
     Temperature(f32),
@@ -22,9 +23,12 @@ pub enum Events {
     Charging(bool),
     InSync(bool),
     ReferenceCalendarEvent(CalendarEvent),
-    ReferenceCalendarEventBatch(Arc<Vec<CalendarEvent>>),
+    ReferenceCalendarEventUpdatesBatch(Arc<Vec<CalendarEvent>>),
+    ReferenceCalendarEventDropsBatch(Arc<Vec<CalendarEventKey>>),
     CalendarEvent(CalendarEvent),
     CalendarEventsBatch(Arc<Vec<CalendarEvent>>),
+    DropCalendarEventsBatch(Arc<Vec<CalendarEventKey>>),
     Restored(PersistenceUnit),
+    PersistedCalendarEvents(Arc<Vec<CalendarEventKey>>),
     Term,
 }

@@ -18,7 +18,7 @@ pub enum RenderMode {
 
 pub trait ClockDisplayInterface {
     type Error: Debug;
-    type ColorModel: RgbColor + From<RawU16>;
+    type ColorModel: RgbColor + From<RawU16> + Default;
     type FrameBuffer<'b>: DrawTarget<Error = Self::Error, Color = Self::ColorModel>;
 
     const FRAME_BUFFER_SIDE: usize;

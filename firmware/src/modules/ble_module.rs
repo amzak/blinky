@@ -1,6 +1,11 @@
+use blinky_shared::calendar::CalendarEventKey;
+use blinky_shared::contract::packets::{
+    CalendarEventSyncResponsePacket, ReferenceDataPacket, ReferenceDataPacketType,
+};
+use esp32_nimble::utilities::mutex::Mutex;
 use esp32_nimble::utilities::BleUuid;
-use esp32_nimble::{uuid128, BLEAdvertisementData, BLEDevice, NimbleProperties};
-use log::{error, info, warn};
+use esp32_nimble::{uuid128, BLEAdvertisementData, BLECharacteristic, BLEDevice, NimbleProperties};
+use log::{error, info};
 use std::sync::mpsc::{channel, Sender};
 use std::sync::Arc;
 
@@ -11,18 +16,41 @@ use blinky_shared::message_bus::{BusHandler, BusSender, MessageBus};
 pub struct BleModule {}
 
 struct Context {
-    tx: Sender<Commands>,
+    tx: Sender<BleCommands>,
+}
+
+struct BleContext {
+    is_ble_initialized: bool,
+    rw_characteristic: Option<Arc<Mutex<BLECharacteristic>>>,
+}
+
+#[derive(Clone, Debug)]
+pub enum BleCommands {
+    StartAdvertising,
+    Shutdown,
+    ReplyPersisted(Arc<Vec<CalendarEventKey>>),
 }
 
 impl BusHandler<Context> for BleModule {
-    async fn event_handler(_bus: &BusSender, _context: &mut Context, _event: Events) {}
+    async fn event_handler(_bus: &BusSender, context: &mut Context, event: Events) {
+        match event {
+            Events::PersistedCalendarEvents(events) => {
+                context
+                    .tx
+                    .send(BleCommands::ReplyPersisted(events))
+                    .unwrap();
+            }
+            _ => {}
+        }
+    }
 
     async fn command_handler(_bus: &BusSender, context: &mut Context, command: Commands) {
         match command {
-            Commands::RequestReferenceData | Commands::ShutdownBle | Commands::StartDeepSleep => {
-                if let Err(err) = context.tx.send(command) {
-                    error!("{:?}", err);
-                }
+            Commands::RequestReferenceData => {
+                context.tx.send(BleCommands::StartAdvertising).unwrap();
+            }
+            Commands::ShutdownBle | Commands::StartDeepSleep => {
+                context.tx.send(BleCommands::Shutdown).unwrap();
             }
             _ => {}
         }
@@ -41,13 +69,13 @@ impl BleModule {
     pub async fn start(bus: MessageBus) {
         info!("starting...");
 
-        let (tx, rx) = channel::<Commands>();
+        let (tx, rx) = channel::<BleCommands>();
 
         let context = Context { tx };
 
         let bus_clone = bus.clone();
         let ble_task = tokio::task::spawn_blocking(move || {
-            Self::setup_bluetooth(bus_clone, rx);
+            Self::ble_loop(bus_clone, rx);
         });
 
         MessageBus::handle::<Context, Self>(bus, context).await;
@@ -57,18 +85,62 @@ impl BleModule {
         info!("done.");
     }
 
-    fn setup_bluetooth(bus: MessageBus, rx: std::sync::mpsc::Receiver<Commands>) {
-        let command = rx.recv().unwrap();
+    fn ble_loop(bus: MessageBus, rx: std::sync::mpsc::Receiver<BleCommands>) {
+        let mut context = BleContext {
+            rw_characteristic: None,
+            is_ble_initialized: false,
+        };
 
-        if matches!(command, Commands::StartDeepSleep) {
-            return;
+        loop {
+            match rx.recv() {
+                Ok(command) => {
+                    Self::handle_ble_command(&bus, &mut context, command);
+                }
+                Err(err) => {
+                    error!("ble error: {:?}", err);
+                    return;
+                }
+            }
         }
+    }
 
+    fn handle_ble_command(bus: &MessageBus, context: &mut BleContext, command: BleCommands) {
+        match command {
+            BleCommands::StartAdvertising => {
+                let rw = Self::start_ble_advertising(bus);
+
+                if let Some(ch) = rw {
+                    let _ = context.rw_characteristic.insert(ch);
+
+                    context.is_ble_initialized = true;
+                }
+            }
+            BleCommands::Shutdown => {
+                if context.is_ble_initialized {
+                    Self::shutdown_ble();
+                    context.is_ble_initialized = false;
+                }
+            }
+            BleCommands::ReplyPersisted(events) => {
+                if context.is_ble_initialized {
+                    Self::reply_persisted(context, events);
+                    Self::shutdown_ble();
+                    context.is_ble_initialized = false;
+                } else {
+                    error!("reply_persisted skipped!");
+                }
+            }
+        }
+    }
+
+    fn start_ble_advertising(bus: &MessageBus) -> Option<Arc<Mutex<BLECharacteristic>>> {
         info!("initializing bluetooth...");
 
         let ble_device = BLEDevice::take();
 
         let server = ble_device.get_server();
+
+        server.ble_gatts_show_local();
         server.advertise_on_disconnect(false);
 
         let bus_clone = bus.clone();
@@ -100,19 +172,14 @@ impl BleModule {
 
         let rw_characteristic = service.lock().create_characteristic(
             Self::RW_CHARACTERISTIC,
-            NimbleProperties::READ | NimbleProperties::WRITE,
+            NimbleProperties::READ | NimbleProperties::WRITE | NimbleProperties::NOTIFY,
         );
 
-        rw_characteristic
-            .lock()
-            .on_read(move |val, _| {
-                val.set_value("Sample value".as_ref());
-                info!("Read from writable characteristic.");
-            })
-            .on_write(move |args| {
-                let data = args.recv_data();
-                bus.send_event(Events::IncomingData(Arc::new(Vec::from(data))));
-            });
+        let bus = bus.clone();
+        rw_characteristic.lock().on_write(move |args| {
+            let data = args.recv_data();
+            bus.send_event(Events::IncomingData(Arc::new(Vec::from(data))));
+        });
 
         let advertising = ble_device.get_advertising();
 
@@ -125,7 +192,7 @@ impl BleModule {
 
         if let Err(error) = advertising.lock().start() {
             error!("can't start ble advertising, error {:?}", error);
-            return;
+            return None;
         }
 
         info!("advertising...");
@@ -134,17 +201,62 @@ impl BleModule {
             .lock()
             .on_complete(|x| info!("advertising completed."));
 
-        /*
-        for i in 0..60 {
-            notifying_characteristic.lock().set_value(format!("tick {}", i).as_bytes()).notify();
-            sleep(Duration::from_millis(1000)).await;
+        return Some(rw_characteristic);
+    }
+
+    fn shutdown_ble() {
+        info!("shutting down BLE...");
+
+        let ble_device = BLEDevice::take();
+        let server = ble_device.get_server();
+
+        let connections = server.connections();
+
+        for connection in connections {
+            info!("client {:?}", connection.address());
         }
-        */
 
-        let command = rx.recv().unwrap();
-
-        if let Err(err) = BLEDevice::deinit_full() {
+        if let Err(err) = BLEDevice::deinit() {
             error!("{:?}", err);
         }
+
+        info!("BLE shut down.");
+    }
+
+    fn reply_persisted(context: &BleContext, events: Arc<Vec<CalendarEventKey>>) {
+        info!("replying persisted {} events...", events.len());
+
+        let packets = events.iter().map(|x| {
+            let packet = CalendarEventSyncResponsePacket {
+                kind: x.0,
+                event_id: x.1,
+            };
+
+            let reference_packet = ReferenceDataPacket::wrap(
+                ReferenceDataPacketType::CalendarEventsSyncResponse,
+                packet,
+            );
+
+            let buf = reference_packet.serialize();
+
+            buf
+        });
+
+        for packet in packets {
+            let buf = packet.as_slice();
+
+            info!("replying packet: {:02X?}", &buf);
+
+            context
+                .rw_characteristic
+                .as_ref()
+                .unwrap()
+                .lock()
+                .set_value(buf);
+
+            context.rw_characteristic.as_ref().unwrap().lock().notify();
+        }
+
+        info!("replying persisted complete.");
     }
 }

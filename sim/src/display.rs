@@ -44,9 +44,10 @@ impl ClockDisplayInterface for SimDisplay {
         let output_settings = OutputSettingsBuilder::new()
             .scale(3)
             .pixel_spacing(1)
+            .max_fps(5)
             .build();
 
-        let window = Window::new("Hello World", &output_settings);
+        let window = Window::new("Blinky watch sim", &output_settings);
 
         let buffer_layers = vec![
             Self::prepare_frame_buf(),

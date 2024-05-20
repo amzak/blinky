@@ -19,7 +19,7 @@ impl BusHandler<ContextStub> for LoggingModule {
                 }
             },
             Events::IncomingData(data) => {
-                info!("IncomingData with {} bytes", data.len());
+                info!("IncomingData {:02X?}", &data);
             }
             _ => {
                 info!("{:?}", event);

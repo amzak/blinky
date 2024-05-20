@@ -2,6 +2,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use crate::modules::reference_time::ReferenceTimeUtc;
+use blinky_shared::calendar::CalendarEventKey;
 use log::{error, info, warn};
 use serde::{Deserialize, Serialize};
 use time::{OffsetDateTime, UtcOffset};
@@ -24,7 +25,7 @@ pub struct CalendarStateDto {
 }
 
 struct Context {
-    calendar_events: HashSet<CalendarEvent>,
+    update_events: HashSet<CalendarEvent>,
     now: Option<OffsetDateTime>,
     utc_offset: Option<UtcOffset>,
 }
@@ -46,28 +47,26 @@ impl BusHandler<Context> for CalendarModule {
                 context.now = Some(time_now);
             }
             Events::ReferenceCalendarEvent(reference_calendar_event) => {
-                handle_event(context, &reference_calendar_event);
+                handle_event_update(context, &reference_calendar_event);
 
                 bus.send_event(Events::CalendarEvent(reference_calendar_event));
             }
-            Events::ReferenceCalendarEventBatch(batch) => {
+            Events::ReferenceCalendarEventUpdatesBatch(batch) => {
                 for event in batch.as_slice() {
-                    handle_event(context, &event);
+                    handle_event_update(context, event);
                 }
 
                 bus.send_event(Events::CalendarEventsBatch(batch));
             }
+            Events::ReferenceCalendarEventDropsBatch(batch) => {
+                bus.send_event(Events::DropCalendarEventsBatch(batch));
+            }
             Events::InSync(true) => {
-                if context.calendar_events.len() == 0 {
+                if context.update_events.len() == 0 {
                     return;
                 }
 
-                Self::persist_events(
-                    bus,
-                    Vec::from_iter(context.calendar_events.iter().map(|x| x.clone())),
-                    &context.now,
-                )
-                .await;
+                Self::persist_events(bus, context).await;
 
                 info!("events persisted");
             }
@@ -89,7 +88,7 @@ impl BusHandler<Context> for CalendarModule {
 
                 Self::try_restore(
                     bus,
-                    &mut context.calendar_events,
+                    &mut context.update_events,
                     unit,
                     context.utc_offset.unwrap(),
                 )
@@ -113,9 +112,9 @@ impl BusHandler<Context> for CalendarModule {
     }
 }
 
-fn handle_event(context: &mut Context, reference_calendar_event: &CalendarEvent) {
+fn handle_event_update(context: &mut Context, reference_calendar_event: &CalendarEvent) {
     let replaced = context
-        .calendar_events
+        .update_events
         .replace(reference_calendar_event.clone());
 
     if replaced.is_some() {
@@ -128,7 +127,7 @@ impl CalendarModule {
         info!("starting...");
 
         let context = Context {
-            calendar_events: HashSet::new(),
+            update_events: HashSet::new(),
             now: None,
             utc_offset: None,
         };
@@ -177,24 +176,35 @@ impl CalendarModule {
         return true;
     }
 
-    async fn persist_events(
-        commands: &BusSender,
-        mut calendar_events: Vec<CalendarEvent>,
-        now: &Option<OffsetDateTime>,
-    ) {
+    async fn persist_events(bus: &BusSender, context: &mut Context) {
+        let now = context.now;
+
         if now.is_none() {
             return;
         }
 
         let now = now.unwrap();
 
-        calendar_events.retain(|x| x.end >= now);
+        context.update_events.retain(|x| x.end >= now);
 
-        let dtos: Vec<CalendarEventDto> = calendar_events.into_iter().map(|x| x.into()).collect();
+        let calendar_events = context.update_events.iter();
+
+        let event_keys: Vec<CalendarEventKey> = calendar_events
+            .map(|x| CalendarEventKey(x.kind, x.id))
+            .collect();
+
+        let calendar_events = context.update_events.iter();
+
+        let dtos: Vec<CalendarEventDto> = calendar_events
+            .into_iter()
+            .map(|x| CalendarEventDto::from(x))
+            .collect();
+
         let calendar_state_dto = CalendarStateDto::new(dtos, now.into());
         let persistence_unit =
             PersistenceUnit::new(PersistenceUnitKind::CalendarSyncInfo, &calendar_state_dto);
 
-        commands.send_cmd(Commands::Persist(persistence_unit));
+        bus.send_cmd(Commands::Persist(persistence_unit));
+        bus.send_event(Events::PersistedCalendarEvents(Arc::new(event_keys)))
     }
 }

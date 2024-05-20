@@ -1,10 +1,10 @@
-use blinky_shared::calendar::CalendarEvent;
+use blinky_shared::calendar::{CalendarEvent, CalendarEventKey};
 use blinky_shared::contract::packets::{
-    CalendarEventsMetaPacket, ReferenceCalendarEventPacket, ReferenceDataPacket,
-    ReferenceDataPacketType, ReferenceLocationPacket, ReferenceTimePacket,
+    CalendarEventsMetaPacket, DropCalendarEventPacket, ReferenceCalendarEventPacket,
+    ReferenceDataPacket, ReferenceDataPacketType, ReferenceLocationPacket, ReferenceTimePacket,
 };
 use blinky_shared::error::Error;
-use log::{error, info, warn};
+use log::{error, info};
 use serde::{Deserialize, Serialize};
 use std::ops::Add;
 use std::sync::Arc;
@@ -25,8 +25,10 @@ pub struct Context {
 
 pub struct ProcessingContext {
     now_opt: Option<OffsetDateTime>,
-    unprocessed_events: Vec<ReferenceDataPacket>,
-    expect_events_count: u16,
+    unprocessed_event_updates: Vec<ReferenceDataPacket>,
+    unprocessed_event_drops: Vec<ReferenceDataPacket>,
+    update_events_count: u16,
+    drop_events_count: u16,
 }
 
 #[derive(Debug, Deserialize, PartialEq, Clone)]
@@ -114,8 +116,10 @@ impl ReferenceTime {
     fn reference_processing_loop(bus: MessageBus, mut rx: Receiver<Events>) {
         let mut context = ProcessingContext {
             now_opt: None,
-            unprocessed_events: vec![],
-            expect_events_count: 0,
+            unprocessed_event_updates: vec![],
+            unprocessed_event_drops: vec![],
+            update_events_count: 0,
+            drop_events_count: 0,
         };
 
         loop {
@@ -163,16 +167,6 @@ impl ReferenceTime {
                     ReferenceDataPacketType::Location => {
                         Self::handle_reference_location(bus, reference_data.packet_payload);
                     }
-                    ReferenceDataPacketType::CalendarEvent => {
-                        context.unprocessed_events.push(reference_data);
-
-                        if context.expect_events_count > 0
-                            && context.expect_events_count as usize
-                                == context.unprocessed_events.len()
-                        {
-                            Self::handle_sync_completed(context, bus);
-                        }
-                    }
                     ReferenceDataPacketType::CalendarEventsMeta => {
                         let deserialize_result =
                             rmp_serde::from_slice(&reference_data.packet_payload);
@@ -183,10 +177,26 @@ impl ReferenceTime {
 
                         let events_meta: CalendarEventsMetaPacket = deserialize_result.unwrap();
 
-                        context.expect_events_count = events_meta.events_count;
+                        context.update_events_count = events_meta.update_events_count;
+                        context.drop_events_count = events_meta.drop_events_count;
 
-                        info!("expecting {} events", context.expect_events_count);
+                        info!("expecting {} events", context.update_events_count);
                     }
+                    ReferenceDataPacketType::CalendarEvent => {
+                        context.unprocessed_event_updates.push(reference_data);
+
+                        if Self::is_sync_data_ready(&context) {
+                            Self::handle_sync_completed(context, bus);
+                        }
+                    }
+                    ReferenceDataPacketType::DropCalendarEvent => {
+                        context.unprocessed_event_drops.push(reference_data);
+
+                        if Self::is_sync_data_ready(&context) {
+                            Self::handle_sync_completed(context, bus);
+                        }
+                    }
+                    _ => {}
                 }
             }
             _ => {}
@@ -229,35 +239,70 @@ impl ReferenceTime {
         info!("{:?}", reference_location)
     }
 
-    fn handle_unprocessed_events(
+    fn handle_sync_completed(context: &mut ProcessingContext, bus: &MessageBus) {
+        let offset_seconds = context.now_opt.unwrap().offset();
+
+        if context.unprocessed_event_updates.len() > 0 || context.unprocessed_event_drops.len() > 0
+        {
+            Self::handle_unprocessed_event_updates(bus, context, offset_seconds);
+            Self::handle_unprocessed_event_drops(bus, context);
+        }
+
+        bus.send_event(Events::InSync(true));
+    }
+
+    fn handle_unprocessed_event_updates(
         bus: &MessageBus,
         context: &mut ProcessingContext,
         offset: UtcOffset,
     ) {
         let events_iter: Vec<_> = context
-            .unprocessed_events
+            .unprocessed_event_updates
             .drain(..)
-            .map(|x| {
-                let reference_calendar_event: ReferenceCalendarEventPacket =
-                    rmp_serde::from_slice(&x.packet_payload).unwrap();
-                CalendarEvent::new(reference_calendar_event.calendar_event, offset)
+            .filter_map(|x| {
+                let res: Result<ReferenceCalendarEventPacket, rmp_serde::decode::Error> =
+                    rmp_serde::from_slice(&x.packet_payload);
+
+                match res {
+                    Ok(event_dto) => Some(CalendarEvent::new(event_dto.calendar_event, offset)),
+                    Err(err) => {
+                        error!("{:?} {:02X?}", err, x.packet_payload);
+                        None
+                    }
+                }
             })
             .collect();
 
         for chunk in events_iter.chunks(5) {
-            bus.send_event(Events::ReferenceCalendarEventBatch(Arc::new(
+            bus.send_event(Events::ReferenceCalendarEventUpdatesBatch(Arc::new(
                 chunk.to_vec(),
             )));
         }
     }
 
-    fn handle_sync_completed(context: &mut ProcessingContext, bus: &MessageBus) {
-        let offset_seconds = context.now_opt.unwrap().offset();
-        bus.send_cmd(Commands::ShutdownBle);
-        if context.unprocessed_events.len() > 0 {
-            Self::handle_unprocessed_events(bus, context, offset_seconds);
-        }
+    fn handle_unprocessed_event_drops(bus: &MessageBus, context: &mut ProcessingContext) {
+        let events_iter: Vec<_> = context
+            .unprocessed_event_updates
+            .drain(..)
+            .map(|x| {
+                let drop: DropCalendarEventPacket =
+                    rmp_serde::from_slice(&x.packet_payload).unwrap();
+                CalendarEventKey(drop.kind, drop.event_id)
+            })
+            .collect();
 
-        bus.send_event(Events::InSync(true));
+        for chunk in events_iter.chunks(5) {
+            bus.send_event(Events::ReferenceCalendarEventDropsBatch(Arc::new(
+                chunk.to_vec(),
+            )));
+        }
+    }
+
+    fn is_sync_data_ready(context: &ProcessingContext) -> bool {
+        let expected_updates = context.update_events_count as usize;
+        let expected_drops = context.drop_events_count as usize;
+
+        return expected_updates == context.unprocessed_event_updates.len()
+            && expected_drops == context.unprocessed_event_drops.len();
     }
 }

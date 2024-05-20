@@ -2,8 +2,9 @@
 #![feature(duration_constructors)]
 
 use std::ops::Add;
+use std::sync::Arc;
 
-use blinky_shared::calendar::CalendarEvent;
+use blinky_shared::calendar::{CalendarEvent, CalendarEventKey, CalendarKind};
 use blinky_shared::events::Events;
 use blinky_shared::message_bus::MessageBus;
 use blinky_shared::{commands::Commands, modules::renderer::Renderer};
@@ -57,8 +58,9 @@ async fn main_async() -> Result<(), Box<dyn std::error::Error>> {
 
         let mut now = OffsetDateTime::new_utc(date, Time::from_hms(12, 0, 0).unwrap()); //Time::MIDNIGHT);
 
-        let event_start_time =
-            OffsetDateTime::new_utc(date, Time::MIDNIGHT) + Duration::from_hours(11);
+        let event_start_time = OffsetDateTime::new_utc(date, Time::MIDNIGHT)
+            + Duration::from_hours(12)
+            + Duration::from_secs(5);
 
         let duration = Duration::from_hours(2);
 
@@ -70,12 +72,38 @@ async fn main_async() -> Result<(), Box<dyn std::error::Error>> {
 
         message_bus.send_event(Events::CalendarEvent(CalendarEvent {
             id: 0,
+            kind: CalendarKind::Phone,
             start: event_start_time,
             end: event_start_time + duration,
             title: "qqq".to_string(),
+            description: "some description".to_string(),
+            icon: blinky_shared::calendar::CalendarEventIcon::Rain,
+            color: 0,
+        }));
+
+        message_bus.send_event(Events::CalendarEvent(CalendarEvent {
+            id: 1,
+            kind: CalendarKind::Phone,
+            start: now,
+            end: now + Duration::from_days(1),
+            title: "all day".to_string(),
+            description: "".to_string(),
             icon: blinky_shared::calendar::CalendarEventIcon::Default,
             color: 0,
         }));
+
+        let sample_event = CalendarEvent {
+            id: 2,
+            kind: CalendarKind::Phone,
+            start: event_start_time + duration * 3,
+            end: event_start_time + duration * 4,
+            title: "qqq".to_string(),
+            description: "description".to_string(),
+            icon: blinky_shared::calendar::CalendarEventIcon::Car,
+            color: 0,
+        };
+
+        //message_bus.send_event(Events::CalendarEvent(sample_event.clone()));
 
         /*
         for i in 1..40 {
@@ -94,10 +122,25 @@ async fn main_async() -> Result<(), Box<dyn std::error::Error>> {
         }
          */
 
+        let mut toggler = false;
+
         loop {
             sleep(Duration::from_millis(1000)).await;
 
             message_bus.send_event(Events::TimeNow(now));
+
+            if (toggler) {
+                message_bus.send_event(Events::CalendarEvent(sample_event.clone()));
+            } else {
+                let events = Arc::new(vec![sample_event.key()]);
+
+                message_bus.send_event(Events::DropCalendarEventsBatch(events));
+
+                message_bus.send_event(Events::Key1Press);
+            }
+
+            toggler = !toggler;
+
             now = now.add(Duration::from_secs(1));
         }
     };
