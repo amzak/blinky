@@ -2,7 +2,6 @@ use crate::peripherals::i2c_proxy_async::I2cProxyAsync;
 use esp_idf_hal::i2c::I2cDriver;
 use log::info;
 use time::{PrimitiveDateTime, UtcOffset};
-use tokio::runtime::Handle;
 use tokio::select;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::sync::watch;
@@ -66,36 +65,25 @@ impl RtcModule {
         tx_timer: tokio::sync::watch::Sender<bool>,
         proxy: I2cProxyAsync<I2cDriver<'static>>,
     ) {
-        let mut timezone: Option<UtcOffset> = None;
+        let mut timezone: UtcOffset = UtcOffset::from_whole_seconds(0).unwrap();
 
         let mut rtc = Rtc::create(proxy);
 
-        let handle = Handle::current();
-
         loop {
-            let command_future = rx.recv();
-
-            let command_opt = handle.block_on(command_future);
+            let command_opt = rx.blocking_recv();
 
             match command_opt {
                 Some(command) => match command {
-                    Commands::GetTimeNow => {
-                        unsafe {
-                            if timezone.is_none() && UTC_OFFSET.is_none() {
-                                continue;
-                            }
-                        }
-
-                        let utc_offset = if timezone.is_none() {
-                            unsafe { UTC_OFFSET.unwrap() }
+                    Commands::GetTimeNow => unsafe {
+                        let utc_offset = if UTC_OFFSET.is_none() {
+                            timezone
                         } else {
-                            timezone.unwrap()
+                            UTC_OFFSET.unwrap()
                         };
-
                         let datetime = rtc.get_now_utc().assume_offset(utc_offset);
 
                         bus.send_event(Events::TimeNow(datetime));
-                    }
+                    },
                     Commands::SetTime(time) => {
                         let offset_utc = time.offset();
 
@@ -103,16 +91,16 @@ impl RtcModule {
                             UTC_OFFSET = Some(time.offset());
                         }
 
-                        timezone = Some(offset_utc);
+                        timezone = offset_utc;
 
                         let now = PrimitiveDateTime::new(time.date(), time.time());
                         rtc.set_now_utc(now).unwrap()
                     }
                     Commands::SetTimezone(tz) => {
-                        timezone = Some(UtcOffset::from_whole_seconds(tz).unwrap());
+                        timezone = UtcOffset::from_whole_seconds(tz).unwrap();
 
                         unsafe {
-                            UTC_OFFSET = timezone;
+                            UTC_OFFSET = Some(timezone);
                         }
                     }
                     Commands::PauseRendering => {
@@ -141,6 +129,8 @@ impl RtcModule {
         interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
         let mut pause_flag = false;
+
+        info!("timer loop started");
 
         loop {
             select! {

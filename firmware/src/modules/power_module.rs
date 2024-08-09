@@ -48,8 +48,8 @@ impl PowerModule {
     pub async fn start(adc: ADC1, gpio36: Gpio36, config: PinConfig, bus: MessageBus) {
         info!("starting...");
 
-        Self::announce_wakeup_cause(&bus).await;
-        Self::announce_battery_level(&bus, adc, gpio36).await;
+        // Self::announce_wakeup_cause(&bus).await;
+        // Self::announce_battery_level(&bus, adc, gpio36).await;
 
         let backlight = Self::init_backlight(config.backlight);
         let idle_reset = Arc::new(Notify::new());
@@ -61,6 +61,9 @@ impl PowerModule {
         ));
 
         let context = Context { idle_reset };
+
+        Self::announce_wakeup_cause(&bus).await;
+        Self::announce_battery_level(&bus, adc, gpio36).await;
 
         MessageBus::handle::<Context, Self>(bus, context).await;
 
@@ -113,7 +116,9 @@ impl PowerModule {
     }
 
     fn init_backlight(backlight_pin: i32) -> Backlight<'static> {
-        Backlight::create(backlight_pin)
+        let backlight = Backlight::create(backlight_pin, true);
+
+        backlight
     }
 
     async fn get_wakeup_cause() -> WakeupCause {

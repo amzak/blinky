@@ -59,6 +59,8 @@ impl<'a> Rtc<'a> {
 
         let result = self.rtc.set_datetime(&dt);
 
+        //self.rtc.timer_interrupt_output(output);
+
         return result.map_err(|err: pcf8563::Error<I2cError>| match err {
             I2C(i2c_err) => Error::from(i2c_err.to_string().as_str()),
             pcf8563::Error::InvalidInputData => Error::from("invalid input data"),

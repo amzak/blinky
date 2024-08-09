@@ -1,18 +1,23 @@
 #![feature(slice_as_chunks)]
 #![feature(vec_push_within_capacity)]
 #![feature(associated_type_bounds)]
+#![feature(type_alias_impl_trait)]
+#![feature(associated_type_defaults)]
 
 use blinky_shared::commands::Commands;
+use blinky_shared::events::Events;
 use blinky_shared::message_bus::MessageBus;
 use blinky_shared::modules::renderer::Renderer;
+use blinky_shared::persistence::PersistenceUnitKind;
 use esp_idf_hal::i2c::I2cDriver;
 use esp_idf_hal::peripherals::Peripherals;
 use esp_idf_svc::log::{set_target_level, EspLogger};
 use log::*;
+use peripherals::backlight::{self, Backlight};
 use peripherals::i2c_proxy_async::I2cProxyAsync;
 use std::future::Future;
+use std::pin::Pin;
 use std::thread;
-use tokio::join;
 
 extern crate blinky_shared;
 
@@ -41,12 +46,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     esp_idf_sys::link_patches();
 
     EspLogger::initialize_default();
+
     set_max_level(LevelFilter::Info);
     set_target_level("spi_master", LevelFilter::Error).unwrap();
 
     let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_time()
-        .worker_threads(2)
         .on_thread_start(|| {
             let core = esp_idf_hal::cpu::core();
 
@@ -58,6 +63,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             );
         })
         .thread_stack_size(10 * 1024)
+        //.worker_threads(2)
         .build()?;
 
     rt.block_on(main_async())?;
@@ -78,24 +84,40 @@ async fn main_async() -> Result<(), Box<dyn std::error::Error>> {
         touch_reset_pin: 33,
     };
 
+    let pin_conf = PinConfig { backlight: 21 };
+
     let message_bus = MessageBus::new();
 
     let hal: HAL = HAL::new(hal_conf, peripherals.i2c0);
 
     let logging_task = start_logging(&message_bus);
 
+    let mut mb = message_bus.clone();
+    let wait_for_first_render_task = mb.wait_for(Events::FirstRender);
+
     let i2c_proxy = hal.get_i2c_proxy_async().clone();
     let rtc_task = start_rtc(&message_bus, i2c_proxy);
 
-    let time_sync_task = start_time_sync(&message_bus);
-
     let renderer_task = start_renderer(&message_bus);
 
-    let ble_task = start_ble(&message_bus);
+    let _initial_backlight = Backlight::create(pin_conf.backlight, true);
 
-    let pin_conf = PinConfig { backlight: 21 };
+    let tasks_batch: Vec<Pin<Box<dyn futures::Future<Output = ()>>>> = vec![
+        Box::pin(logging_task),
+        Box::pin(wait_for_first_render_task),
+        Box::pin(rtc_task),
+        Box::pin(renderer_task),
+    ];
+
+    let (_, _, mut remaining_tasks) = futures::future::select_all(tasks_batch).await;
+
+    let time_sync_task = start_time_sync(&message_bus);
+
     let mb = message_bus.clone();
-    let power_task = PowerModule::start(peripherals.adc1, peripherals.pins.gpio36, pin_conf, mb);
+    let persister_task = PersisterModule::start(mb);
+
+    let mb = message_bus.clone();
+    let ble_task = BleModule::start(mb);
 
     let mb = message_bus.clone();
     let user_input_task = UserInput::start(mb);
@@ -118,28 +140,31 @@ async fn main_async() -> Result<(), Box<dyn std::error::Error>> {
     let calendar_task = CalendarModule::start(mb);
 
     let mb = message_bus.clone();
-    let persister_task = PersisterModule::start(mb);
 
     let startup_sequence = async move {
-        message_bus.send_cmd(Commands::SyncRtc);
-        message_bus.send_cmd(Commands::SyncCalendar);
+        mb.send_cmd(Commands::Restore(PersistenceUnitKind::RtcSyncInfo));
+        mb.send_cmd(Commands::SyncCalendar);
     };
 
-    let _ = join!(
-        logging_task,
-        rtc_task,
-        time_sync_task,
-        accel_task,
-        renderer_task,
-        ble_task,
-        user_input_task,
-        touch_task,
-        reference_time_task,
-        power_task,
-        persister_task,
-        calendar_task,
-        startup_sequence,
-    );
+    let mb = message_bus.clone();
+    let power_task = PowerModule::start(peripherals.adc1, peripherals.pins.gpio36, pin_conf, mb);
+
+    let mut rest: Vec<Pin<Box<dyn futures::Future<Output = ()>>>> = vec![
+        Box::pin(power_task),
+        Box::pin(time_sync_task),
+        Box::pin(persister_task),
+        Box::pin(accel_task),
+        Box::pin(ble_task),
+        Box::pin(user_input_task),
+        Box::pin(touch_task),
+        Box::pin(reference_time_task),
+        Box::pin(calendar_task),
+        Box::pin(startup_sequence),
+    ];
+
+    remaining_tasks.append(&mut rest);
+
+    futures::future::join_all(remaining_tasks).await;
 
     info!("done.");
 
@@ -163,11 +188,6 @@ fn start_rtc(
 ) -> impl Future<Output = ()> {
     let mb = mb.clone();
     RtcModule::start(i2c_proxy, mb)
-}
-
-fn start_ble(mb: &MessageBus) -> impl Future<Output = ()> {
-    let mb = mb.clone();
-    BleModule::start(mb)
 }
 
 fn start_renderer(mb: &MessageBus) -> impl Future<Output = ()> {

@@ -5,13 +5,15 @@ use embedded_graphics::{
     draw_target::DrawTarget,
     geometry::{Point, Size},
     pixelcolor::{Rgb565, RgbColor},
+    primitives::Rectangle,
     Pixel,
 };
 use embedded_graphics_framebuf::FrameBuf;
 use embedded_graphics_simulator::{
     BinaryColorTheme, OutputSettingsBuilder, SimulatorDisplay, Window,
 };
-use log::debug;
+use enumflags2::{BitFlag, BitFlags};
+use log::{debug, info};
 
 use std::fmt::Debug;
 
@@ -19,7 +21,7 @@ pub struct SimDisplay {
     display: SimulatorDisplay<Rgb565>,
     buffer_base: Box<[Rgb565]>,
     buffer_layers: Vec<Box<[Rgb565]>>,
-    static_rendered: bool,
+    is_first_render: bool,
     window: Window,
 }
 
@@ -59,7 +61,7 @@ impl ClockDisplayInterface for SimDisplay {
             display,
             buffer_layers,
             buffer_base: Self::prepare_frame_buf(),
-            static_rendered: false,
+            is_first_render: true,
             window,
         }
     }
@@ -70,11 +72,13 @@ impl ClockDisplayInterface for SimDisplay {
         mode: RenderMode,
         func: impl FnOnce(Self::FrameBuffer<'c>) -> Self::FrameBuffer<'c>,
     ) {
-        if matches!(layer, LayerType::Static) && self.static_rendered {
-            return;
-        }
+        let layer_value = layer as i32;
 
-        let layer_index = layer as usize;
+        let log2 = f32::log2(layer_value as f32);
+
+        let layer_index: usize = f32::round(log2) as usize;
+
+        debug!("rendering {:?} to index {:?}", layer, layer_index);
 
         let data = self.buffer_layers[layer_index].as_mut();
 
@@ -90,16 +94,12 @@ impl ClockDisplayInterface for SimDisplay {
 
         func(frame);
 
-        if matches!(layer, LayerType::Static) {
-            self.static_rendered = true;
-        }
-
         let timing_frame = now.elapsed();
 
         debug!("render timing: frame {}", timing_frame.as_millis());
     }
 
-    fn commit(&mut self) {
+    fn commit(&mut self, merge_layers_mask: BitFlags<LayerType>) {
         let layers_count = self.buffer_layers.len();
 
         let base_layer = self.buffer_base.as_mut();
@@ -107,6 +107,10 @@ impl ClockDisplayInterface for SimDisplay {
         base_layer.fill(Rgb565::BLACK);
 
         for layer_index in 0..layers_count {
+            if !merge_layers_mask.contains(BitFlags::from_bits_truncate(1 << layer_index)) {
+                continue;
+            }
+
             let layer = self.buffer_layers[layer_index].as_ref();
 
             for pixel_index in 0..layer.len() {
@@ -118,19 +122,38 @@ impl ClockDisplayInterface for SimDisplay {
             }
         }
 
+        let rect = Rectangle::new(
+            Point::zero(),
+            Size::new(
+                Self::FRAME_BUFFER_SIDE as u32,
+                Self::FRAME_BUFFER_SIDE as u32,
+            ),
+        );
+
         let data = self.buffer_base.as_mut();
 
-        let t = data.into_iter().enumerate().map(|(i, x)| {
-            Pixel(
-                Point::new(
-                    (i % Self::FRAME_BUFFER_SIDE) as i32,
-                    (i / Self::FRAME_BUFFER_SIDE) as i32,
-                ),
-                *x,
-            )
-        });
+        if self.is_first_render {
+            let iter = data.iter().enumerate().filter_map(|item| {
+                let color = *item.1;
+                if color == Self::ColorModel::BLACK {
+                    return None;
+                }
 
-        self.display.draw_iter(t).unwrap();
+                let y = item.0 / Self::FRAME_BUFFER_SIDE;
+                let x = item.0 - y * Self::FRAME_BUFFER_SIDE;
+                let point = Point::new(x as i32, y as i32);
+
+                Some(Pixel(point, color))
+            });
+
+            self.display.draw_iter(iter).unwrap();
+
+            self.is_first_render = false;
+        } else {
+            let iter = data.iter().map(|x| *x);
+
+            self.display.fill_contiguous(&rect, iter).unwrap();
+        }
 
         self.window.update(&self.display);
     }

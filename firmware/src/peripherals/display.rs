@@ -1,33 +1,41 @@
 use blinky_shared::display_interface::{ClockDisplayInterface, LayerType, RenderMode};
-use display_interface_spi::SPIInterfaceNoCS;
+use display_interface_spi::SPIInterface;
 use embedded_graphics::pixelcolor::{Rgb565, RgbColor};
 use embedded_graphics::prelude::{DrawTarget, *};
-use embedded_graphics::primitives::{self, PrimitiveStyle, Rectangle};
+use embedded_graphics::primitives::Rectangle;
 use embedded_graphics_framebuf::FrameBuf;
+use enumflags2::{BitFlag, BitFlags};
 use esp_idf_hal::delay::Ets;
 use esp_idf_hal::gpio::{AnyIOPin, Gpio13, Gpio14, Gpio15, Gpio19, Gpio27, InputOutput, PinDriver};
 use esp_idf_hal::spi;
 use esp_idf_hal::spi::config::DriverConfig;
 use esp_idf_hal::spi::{Dma, SpiDeviceDriver, SpiDriver, SpiSingleDeviceDriver, SPI2};
 use esp_idf_hal::units::FromValueType;
-use log::{debug, info};
-use mipidsi::models::GC9A01;
+use log::info;
+use mipidsi::models::Model;
+use mipidsi::options::{ColorInversion, ColorOrder};
 use mipidsi::{Builder, Display};
 use std::convert::Infallible;
 use std::error::Error;
 use std::fmt::Debug;
 use time::Instant;
 
+use crate::peripherals::GC9A01_NOINIT::Gc9a01Noinit;
+
 pub type EspSpi1InterfaceNoCS<'d> =
-    SPIInterfaceNoCS<SpiSingleDeviceDriver<'d>, PinDriver<'d, Gpio19, InputOutput>>;
-pub type DisplaySPI2<'d> =
-    Display<EspSpi1InterfaceNoCS<'d>, GC9A01, PinDriver<'d, Gpio27, InputOutput>>;
+    SPIInterface<SpiSingleDeviceDriver<'d>, PinDriver<'d, Gpio19, InputOutput>>;
+pub type DisplaySPI2<'d> = Display<
+    EspSpi1InterfaceNoCS<'d>,
+    impl Model<ColorFormat = Rgb565>,
+    PinDriver<'d, Gpio27, InputOutput>,
+>;
 
 pub struct ClockDisplay<'a> {
     display: DisplaySPI2<'a>,
     buffer_base: Box<[Rgb565]>,
     buffer_layers: Vec<Box<[Rgb565]>>,
     static_rendered: bool,
+    is_first_render: bool,
 }
 
 impl<'a> ClockDisplayInterface for ClockDisplay<'a> {
@@ -51,6 +59,7 @@ impl<'a> ClockDisplayInterface for ClockDisplay<'a> {
 
         let config = DriverConfig {
             dma: Dma::Disabled,
+
             intr_flags: Default::default(),
         };
 
@@ -59,19 +68,23 @@ impl<'a> ClockDisplayInterface for ClockDisplay<'a> {
         let spi_config = spi::config::Config::default()
             .baudrate(80_000_000.Hz())
             .polling(true)
-            .queue_size(16)
             .write_only(true);
 
         let spi = SpiDeviceDriver::new(driver, Some(cs), &spi_config).unwrap();
 
-        let di = SPIInterfaceNoCS::new(spi, dc);
+        let di = SPIInterface::new(spi, dc);
 
-        let display = Builder::gc9a01(di)
-            .with_color_order(mipidsi::ColorOrder::Bgr)
-            .with_invert_colors(mipidsi::ColorInversion::Inverted)
-            .init(&mut delay, Some(rst))
+        info!("initializing display spi...");
+
+        let display = Builder::new(Gc9a01Noinit::new(false), di)
+            .color_order(ColorOrder::Bgr)
+            .invert_colors(ColorInversion::Inverted)
+            .reset_pin(rst)
+            .init(&mut delay)
             .map_err(|_| Box::<dyn Error>::from("display init"))
             .unwrap();
+
+        info!("display spi initialized");
 
         let buffer_layers = vec![
             Self::prepare_frame_buf(),
@@ -79,11 +92,14 @@ impl<'a> ClockDisplayInterface for ClockDisplay<'a> {
             Self::prepare_frame_buf(),
         ];
 
+        info!("display buffers initialized");
+
         let res = ClockDisplay {
             display,
             buffer_layers,
             buffer_base: Self::prepare_frame_buf(),
             static_rendered: false,
+            is_first_render: true,
         };
 
         res
@@ -95,11 +111,11 @@ impl<'a> ClockDisplayInterface for ClockDisplay<'a> {
         mode: RenderMode,
         func: impl FnOnce(Self::FrameBuffer<'c>) -> Self::FrameBuffer<'c>,
     ) {
-        if matches!(layer, LayerType::Static) && self.static_rendered {
-            return;
-        }
+        let layer_value = layer as i32;
 
-        let layer_index = layer as usize;
+        let log2 = f32::log2(layer_value as f32);
+
+        let layer_index: usize = f32::round(log2) as usize;
 
         let data = self.buffer_layers[layer_index].as_mut();
 
@@ -118,18 +134,19 @@ impl<'a> ClockDisplayInterface for ClockDisplay<'a> {
             frame.reset();
         }
 
+        let timing_reset = now.elapsed();
+
         func(frame);
 
-        if matches!(layer, LayerType::Static) {
-            self.static_rendered = true;
-        }
+        let timing_frame = now.elapsed() - timing_reset;
 
-        let timing_frame = now.elapsed();
-
-        debug!("render timing: frame {}", timing_frame);
+        info!(
+            "render timing: layer {:?} reset {} frame {}",
+            layer, timing_reset, timing_frame
+        );
     }
 
-    fn commit(&mut self) {
+    fn commit(&mut self, layers_mask: BitFlags<LayerType>) {
         let now = Instant::now();
 
         let layers_count = self.buffer_layers.len();
@@ -138,7 +155,13 @@ impl<'a> ClockDisplayInterface for ClockDisplay<'a> {
 
         base_layer.fill(Rgb565::BLACK);
 
+        let timing_fill_black = now.elapsed();
+
         for layer_index in 0..layers_count {
+            if !layers_mask.contains(BitFlags::from_bits_truncate(1 << layer_index)) {
+                continue;
+            }
+
             let layer = self.buffer_layers[layer_index].as_ref();
 
             for pixel_index in 0..layer.len() {
@@ -150,6 +173,8 @@ impl<'a> ClockDisplayInterface for ClockDisplay<'a> {
             }
         }
 
+        let timing_merge = now.elapsed() - timing_fill_black;
+
         let rect = Rectangle::new(
             Point::zero(),
             Size::new(
@@ -159,18 +184,48 @@ impl<'a> ClockDisplayInterface for ClockDisplay<'a> {
         );
 
         let data = self.buffer_base.as_ref();
-        let iter = data.iter().map(|x| *x);
 
-        let timing_prepare = now.elapsed();
+        //self.is_first_render = false;
 
-        self.display.fill_contiguous(&rect, iter).unwrap();
+        if self.is_first_render {
+            let iter = data.iter().enumerate().filter_map(|item| {
+                let color = *item.1;
+                if color == Self::ColorModel::BLACK {
+                    return None;
+                }
 
-        let timing_render = now.elapsed();
+                let y = item.0 / Self::FRAME_BUFFER_SIDE;
+                let x = item.0 - y * Self::FRAME_BUFFER_SIDE;
+                let point = Point::new(x as i32, y as i32);
 
-        debug!(
-            "render commit timing: prepare {} render {}",
-            timing_prepare, timing_render
+                Some(Pixel(point, color))
+            });
+
+            self.display.draw_iter(iter).unwrap();
+
+            self.is_first_render = false;
+        } else {
+            let iter = data.iter().map(|x| *x);
+
+            self.display.fill_contiguous(&rect, iter).unwrap();
+        }
+
+        let timing_render = now.elapsed() - timing_fill_black - timing_merge;
+
+        info!(
+            "render commit timing: clear_black {} merge {}  render {}",
+            timing_fill_black, timing_merge, timing_render
         );
+    }
+}
+
+impl<'a> Drop for ClockDisplay<'a> {
+    fn drop(&mut self) {
+        let mut delay = Ets;
+
+        self.display.sleep(&mut delay).unwrap();
+
+        info!("display set to sleep mode");
     }
 }
 

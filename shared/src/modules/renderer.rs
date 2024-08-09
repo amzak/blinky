@@ -1,10 +1,11 @@
 use embedded_graphics::image::Image;
 use embedded_graphics::mono_font::ascii::FONT_6X10;
 use embedded_graphics::pixelcolor::raw::RawU16;
-use embedded_graphics::pixelcolor::Rgb565;
+use embedded_graphics::pixelcolor::{Rgb555, Rgb565};
 use embedded_graphics::text::renderer::CharacterStyle;
 use embedded_graphics::text::Text;
 use embedded_graphics_framebuf::FrameBuf;
+use enumflags2::BitFlags;
 use time::{Duration, OffsetDateTime, Time};
 
 use time::macros::format_description;
@@ -13,6 +14,7 @@ use log::{debug, info};
 
 use embedded_icon::mdi::size12px::{self};
 use embedded_icon::prelude::*;
+use tinytga::Tga;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 
 use crate::calendar::CalendarEventIcon;
@@ -21,11 +23,12 @@ use crate::commands::Commands;
 use crate::display_interface::{ClockDisplayInterface, LayerType, RenderMode};
 use crate::events::Events;
 use crate::message_bus::{BusHandler, BusSender, MessageBus};
-use embedded_graphics::primitives::{PrimitiveStyle, StyledDrawable};
+use embedded_graphics::primitives::{PrimitiveStyle, Rectangle, StyledDrawable};
 use embedded_graphics::{mono_font::MonoTextStyle, prelude::*, primitives};
 use std::collections::{BTreeSet, HashSet};
 use std::f32::consts::PI;
 use std::marker::PhantomData;
+use std::path::Iter;
 use std::sync::Arc;
 use u8g2_fonts::{fonts, U8g2TextStyle};
 
@@ -50,6 +53,7 @@ enum VisualMode {
 }
 
 struct ViewModel {
+    is_past_first_frame: bool,
     is_charging: Option<bool>,
     battery_level: Option<u16>,
     ble_connected: Option<bool>,
@@ -183,10 +187,8 @@ where
     ) {
         let width = 40;
         let half_width = width / 2;
-        let style = PrimitiveStyle::with_stroke(
-            TDisplay::ColorModel::from(Rgb565::CSS_DARK_SLATE_GRAY.into()),
-            width,
-        );
+        let value: RawU16 = Rgb565::CSS_DARK_SLATE_GRAY.into();
+        let style = PrimitiveStyle::with_stroke(TDisplay::ColorModel::from(value), width);
         let top_left = Point::new(half_width as i32, half_width as i32);
 
         Graphics::<TDisplay>::circle(
@@ -201,10 +203,8 @@ where
         let width = 5;
         let half_width = width / 2;
 
-        let style = PrimitiveStyle::with_stroke(
-            TDisplay::ColorModel::from(Rgb565::CSS_LIGHT_SLATE_GRAY.into()),
-            width,
-        );
+        let value: RawU16 = Rgb565::CSS_LIGHT_SLATE_GRAY.into();
+        let style = PrimitiveStyle::with_stroke(TDisplay::ColorModel::from(value), width);
 
         Graphics::<TDisplay>::circle(
             frame,
@@ -213,33 +213,33 @@ where
             style,
         );
 
-        let top_left = Point::new(2, 2);
+        // let top_left = Point::new(2, 2);
 
-        let style = PrimitiveStyle::with_stroke(TDisplay::ColorModel::YELLOW, 2);
+        // let style = PrimitiveStyle::with_stroke(TDisplay::ColorModel::YELLOW, 2);
 
-        let quater = Angle::from_degrees(90.0);
+        // let quater = Angle::from_degrees(90.0);
 
-        primitives::Arc::new(
-            top_left,
-            TDisplay::FRAME_BUFFER_SIDE as u32 - top_left.x as u32 * 2,
-            Angle::from_radians(2.0 * std::f32::consts::PI * 5.0 / (60.0 * 12.0)) - quater,
-            Angle::from_radians(2.0 * std::f32::consts::PI * 10.0 / (60.0 * 12.0)),
-        )
-        .into_styled(style)
-        .draw(frame)
-        .unwrap();
+        // primitives::Arc::new(
+        //     top_left,
+        //     TDisplay::FRAME_BUFFER_SIDE as u32 - top_left.x as u32 * 2,
+        //     Angle::from_radians(2.0 * std::f32::consts::PI * 5.0 / (60.0 * 12.0)) - quater,
+        //     Angle::from_radians(2.0 * std::f32::consts::PI * 10.0 / (60.0 * 12.0)),
+        // )
+        // .into_styled(style)
+        // .draw(frame)
+        // .unwrap();
 
-        let style = PrimitiveStyle::with_stroke(TDisplay::ColorModel::RED, 2);
+        // let style = PrimitiveStyle::with_stroke(TDisplay::ColorModel::RED, 2);
 
-        primitives::Arc::new(
-            top_left,
-            TDisplay::FRAME_BUFFER_SIDE as u32 - top_left.x as u32 * 2,
-            Angle::zero() - quater,
-            Angle::from_radians(2.0 * std::f32::consts::PI * 5.0 / (60.0 * 12.0)),
-        )
-        .into_styled(style)
-        .draw(frame)
-        .unwrap();
+        // primitives::Arc::new(
+        //     top_left,
+        //     TDisplay::FRAME_BUFFER_SIDE as u32 - top_left.x as u32 * 2,
+        //     Angle::zero() - quater,
+        //     Angle::from_radians(2.0 * std::f32::consts::PI * 5.0 / (60.0 * 12.0)),
+        // )
+        // .into_styled(style)
+        // .draw(frame)
+        // .unwrap();
     }
 
     fn render_clock_face_marks(
@@ -442,8 +442,13 @@ where
         };
     }
 
-    fn render_loop(_bus: MessageBus, mut rx: Receiver<Events>) {
+    fn render_loop(bus: MessageBus, mut rx: Receiver<Events>) {
+        info!("renderer loop started");
+
         let mut display = TDisplay::create();
+
+        info!("display initialized");
+
         let mut state: ViewModel = ViewModel {
             battery_level: None,
             is_charging: None,
@@ -454,15 +459,36 @@ where
             should_update_events: true,
             should_reset_events: false,
             mode: VisualMode::Normal,
+            is_past_first_frame: false,
         };
 
-        let mut state_changed = false;
+        let mut static_rendered = false;
+
         loop {
+            info!("display loop waiting...");
+
             let event_opt = match rx.try_recv() {
                 Ok(event) => Some(event),
                 Err(err) => match err {
                     tokio::sync::mpsc::error::TryRecvError::Empty => {
-                        Self::render(&mut display, &mut state);
+                        debug!("render started...");
+
+                        let all = LayerType::Static | LayerType::Clock | LayerType::Events;
+                        let render_layers_mask = if static_rendered {
+                            LayerType::Clock | LayerType::Events
+                        } else {
+                            static_rendered = true;
+                            all
+                        };
+
+                        Self::render(&mut display, &mut state, render_layers_mask, all);
+
+                        if !state.is_past_first_frame {
+                            info!("first render");
+                            state.is_past_first_frame = true;
+                            bus.send_event(Events::FirstRender);
+                        }
+
                         rx.blocking_recv()
                     }
                     tokio::sync::mpsc::error::TryRecvError::Disconnected => break,
@@ -475,8 +501,17 @@ where
                 break;
             }
 
-            state_changed |= Self::try_apply_change(event, &mut state);
+            debug!("handling event {:?}", event);
+
+            Self::try_apply_change(event, &mut state);
         }
+
+        Self::render(
+            &mut display,
+            &mut state,
+            LayerType::Static.into(),
+            LayerType::Static.into(),
+        );
 
         info!("renderer loop done");
     }
@@ -534,36 +569,62 @@ where
         return state_changed;
     }
 
-    fn render(display: &mut TDisplay, vm: &mut ViewModel) {
-        display.render(LayerType::Static, RenderMode::Invalidate, |mut frame| {
-            Self::render_clock_face(&mut frame, vm);
-            Self::render_clock_face_marks(&mut frame, vm);
+    fn render(
+        display: &mut TDisplay,
+        vm: &mut ViewModel,
+        render_layers_mask: BitFlags<LayerType>,
+        merge_layers_mask: BitFlags<LayerType>,
+    ) {
+        debug!("render of {:?}", render_layers_mask);
 
-            frame
-        });
+        if render_layers_mask.contains(LayerType::Static) {
+            display.render(LayerType::Static, RenderMode::Invalidate, |mut frame| {
+                let watchface_data = include_bytes!("../../assets/blinky_watchface_2.tga");
+                let tga: Tga<Rgb555> = Tga::from_slice(watchface_data).unwrap();
 
-        display.render(LayerType::Clock, RenderMode::Invalidate, |mut frame| {
-            match vm.mode {
-                VisualMode::Normal => {
-                    Self::render_battery_level(&mut frame, vm);
-                    Self::render_ble_connected(&mut frame, vm);
-                    Self::render_datetime(&mut frame, vm);
-                    Self::render_temperature(&mut frame, vm);
+                let watchface = tga.pixels().filter_map(|x| {
+                    if x.1 == Rgb555::BLACK {
+                        None
+                    } else {
+                        let color = TDisplay::ColorModel::from(x.1);
+
+                        let pixel = Pixel(x.0, color);
+                        Some(pixel)
+                    }
+                });
+
+                frame.draw_iter(watchface);
+
+                frame
+            });
+        }
+
+        if render_layers_mask.contains(LayerType::Clock) {
+            display.render(LayerType::Clock, RenderMode::Invalidate, |mut frame| {
+                match vm.mode {
+                    VisualMode::Normal => {
+                        Self::render_battery_level(&mut frame, vm);
+                        Self::render_ble_connected(&mut frame, vm);
+                        Self::render_datetime(&mut frame, vm);
+                        Self::render_temperature(&mut frame, vm);
+                    }
+                    VisualMode::Details => {
+                        Self::render_current_events_details(&mut frame, vm);
+                    }
                 }
-                VisualMode::Details => {
-                    Self::render_current_events_details(&mut frame, vm);
-                }
-            }
 
-            frame
-        });
+                frame
+            });
+        }
 
-        display.render(LayerType::Events, RenderMode::Ammend, |mut frame| {
-            Self::render_events(&mut frame, vm);
-            frame
-        });
+        if render_layers_mask.contains(LayerType::Events) {
+            display.render(LayerType::Events, RenderMode::Ammend, |mut frame| {
+                Self::render_events(&mut frame, vm);
+                frame
+            });
+        }
 
-        display.commit();
+        display.commit(merge_layers_mask);
     }
 
     fn render_current_events_details(frame: &mut TDisplay::FrameBuffer<'_>, vm: &mut ViewModel) {

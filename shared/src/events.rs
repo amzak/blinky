@@ -30,5 +30,6 @@ pub enum Events {
     DropCalendarEventsBatch(Arc<Vec<CalendarEventKey>>),
     Restored(PersistenceUnit),
     PersistedCalendarEvents(Arc<Vec<CalendarEventKey>>),
+    FirstRender,
     Term,
 }

@@ -95,14 +95,7 @@ impl BusHandler<Context> for TimeSync {
         }
     }
 
-    async fn command_handler(bus: &BusSender, context: &mut Context, command: Commands) {
-        match command {
-            Commands::SyncRtc => {
-                bus.send_cmd(Commands::Restore(PersistenceUnitKind::RtcSyncInfo));
-            }
-            _ => {}
-        }
-    }
+    async fn command_handler(_bus: &BusSender, _context: &mut Context, _command: Commands) {}
 }
 
 impl TimeSync {

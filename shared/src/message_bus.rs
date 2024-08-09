@@ -174,4 +174,27 @@ impl MessageBus {
             error!("{:?}", err);
         }
     }
+
+    pub async fn wait_for(&mut self, target_event: Events) {
+        let mut events_receiver = self.sender.events_sender.subscribe();
+
+        info!("waiting for {:?}...", target_event);
+
+        loop {
+            let event_res = events_receiver.recv().await;
+            match event_res {
+                Ok(event) => match event {
+                    Events::FirstRender => {
+                        break;
+                    }
+                    _ => {}
+                },
+                Err(err) => {
+                    error!("waiting for {:?} {:?}", err, target_event)
+                }
+            }
+        }
+
+        info!("resuming after {:?}", target_event);
+    }
 }

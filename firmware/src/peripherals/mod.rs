@@ -1,3 +1,4 @@
+pub mod GC9A01_NOINIT;
 pub mod accelerometer;
 pub mod adc;
 pub mod backlight;

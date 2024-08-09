@@ -4,7 +4,6 @@ use time::OffsetDateTime;
 #[derive(Clone, Debug)]
 pub enum Commands {
     RequestReferenceData,
-    SyncRtc,
     SyncCalendar,
     GetTimeNow,
     GetReferenceTime,
