@@ -9,5 +9,6 @@ pub mod i2c_management;
 pub mod i2c_proxy_async;
 pub mod nvs_storage;
 pub mod rtc;
+pub mod rtc_memory;
 pub mod touchpad;
 pub mod wifi;

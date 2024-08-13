@@ -1,5 +1,3 @@
-use crate::peripherals::i2c_proxy_async::I2cProxyAsync;
-use esp_idf_hal::i2c::I2cDriver;
 use log::info;
 use time::{PrimitiveDateTime, UtcOffset};
 use tokio::select;
@@ -8,6 +6,7 @@ use tokio::sync::watch;
 use tokio::time::MissedTickBehavior;
 
 use crate::peripherals::rtc::Rtc;
+use crate::peripherals::rtc_memory::UTC_OFFSET;
 
 use blinky_shared::commands::Commands;
 use blinky_shared::events::Events;
@@ -18,9 +17,6 @@ pub struct RtcModule {}
 struct Context {
     tx_rtc: Sender<Commands>,
 }
-
-#[link_section = ".rtc.data"]
-static mut UTC_OFFSET: Option<UtcOffset> = None;
 
 impl BusHandler<Context> for RtcModule {
     async fn event_handler(_bus: &BusSender, _context: &mut Context, _event: Events) {}
@@ -35,15 +31,16 @@ impl BusHandler<Context> for RtcModule {
 }
 
 impl RtcModule {
-    pub async fn start(proxy: I2cProxyAsync<I2cDriver<'static>>, mut bus: MessageBus) {
+    pub async fn start(rtc: Rtc<'static>, bus: MessageBus) {
         info!("starting...");
         let (tx_rtc, rx_rtc) = channel::<Commands>(10);
 
         let (tx_timer, rx_timer) = watch::channel(true);
 
         let bus_clone = bus.clone();
+
         let rtc_task = tokio::task::spawn_blocking(move || {
-            Self::rtc_loop(bus_clone, rx_rtc, tx_timer, proxy);
+            Self::rtc_loop(bus_clone, rx_rtc, tx_timer, rtc);
         });
 
         let timer = tokio::spawn(Self::run_timer(rx_timer, tx_rtc.clone()));
@@ -63,27 +60,32 @@ impl RtcModule {
         bus: MessageBus,
         mut rx: Receiver<Commands>,
         tx_timer: tokio::sync::watch::Sender<bool>,
-        proxy: I2cProxyAsync<I2cDriver<'static>>,
+        rtc_param: Rtc,
     ) {
         let mut timezone: UtcOffset = UtcOffset::from_whole_seconds(0).unwrap();
 
-        let mut rtc = Rtc::create(proxy);
+        let mut rtc = rtc_param;
+
+        let utc_offset = unsafe {
+            if UTC_OFFSET.is_none() {
+                timezone
+            } else {
+                UTC_OFFSET.unwrap()
+            }
+        };
+
+        let datetime = rtc.get_now_utc().assume_offset(utc_offset);
+        bus.send_event(Events::TimeNow(datetime));
 
         loop {
             let command_opt = rx.blocking_recv();
 
             match command_opt {
                 Some(command) => match command {
-                    Commands::GetTimeNow => unsafe {
-                        let utc_offset = if UTC_OFFSET.is_none() {
-                            timezone
-                        } else {
-                            UTC_OFFSET.unwrap()
-                        };
+                    Commands::GetTimeNow => {
                         let datetime = rtc.get_now_utc().assume_offset(utc_offset);
-
                         bus.send_event(Events::TimeNow(datetime));
-                    },
+                    }
                     Commands::SetTime(time) => {
                         let offset_utc = time.offset();
 

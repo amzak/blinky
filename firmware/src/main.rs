@@ -13,11 +13,12 @@ use esp_idf_hal::i2c::I2cDriver;
 use esp_idf_hal::peripherals::Peripherals;
 use esp_idf_svc::log::{set_target_level, EspLogger};
 use log::*;
-use peripherals::backlight::{self, Backlight};
-use peripherals::i2c_proxy_async::I2cProxyAsync;
+use modules::rtc_display_fasttrack::RtcDisplayFastTrack;
+use peripherals::rtc::Rtc;
 use std::future::Future;
 use std::pin::Pin;
 use std::thread;
+use time::OffsetDateTime;
 
 extern crate blinky_shared;
 
@@ -88,7 +89,7 @@ async fn main_async() -> Result<(), Box<dyn std::error::Error>> {
 
     let message_bus = MessageBus::new();
 
-    let hal: HAL = HAL::new(hal_conf, peripherals.i2c0);
+    let hal: HAL = HAL::new(hal_conf.clone(), peripherals.i2c0);
 
     let logging_task = start_logging(&message_bus);
 
@@ -96,11 +97,12 @@ async fn main_async() -> Result<(), Box<dyn std::error::Error>> {
     let wait_for_first_render_task = mb.wait_for(Events::FirstRender);
 
     let i2c_proxy = hal.get_i2c_proxy_async().clone();
-    let rtc_task = start_rtc(&message_bus, i2c_proxy);
+    let fasttrack_result = RtcDisplayFastTrack::run_and_decompose(hal_conf, i2c_proxy);
 
-    let renderer_task = start_renderer(&message_bus);
+    let rtc_task = start_rtc(&message_bus, fasttrack_result.rtc);
 
-    let _initial_backlight = Backlight::create(pin_conf.backlight, true);
+    let renderer_task =
+        start_renderer(&message_bus, fasttrack_result.display, fasttrack_result.now);
 
     let tasks_batch: Vec<Pin<Box<dyn futures::Future<Output = ()>>>> = vec![
         Box::pin(logging_task),
@@ -182,15 +184,16 @@ fn start_time_sync(mb: &MessageBus) -> impl Future<Output = ()> {
     TimeSync::start(mb)
 }
 
-fn start_rtc(
-    mb: &MessageBus,
-    i2c_proxy: I2cProxyAsync<I2cDriver<'static>>,
-) -> impl Future<Output = ()> {
+fn start_rtc(mb: &MessageBus, rtc: Rtc<'static>) -> impl Future<Output = ()> {
     let mb = mb.clone();
-    RtcModule::start(i2c_proxy, mb)
+    RtcModule::start(rtc, mb)
 }
 
-fn start_renderer(mb: &MessageBus) -> impl Future<Output = ()> {
+fn start_renderer(
+    mb: &MessageBus,
+    display: ClockDisplay<'static>,
+    now: Option<OffsetDateTime>,
+) -> impl Future<Output = ()> {
     let mb = mb.clone();
-    Renderer::<ClockDisplay>::start(mb)
+    Renderer::<ClockDisplay>::start(mb, display, now)
 }

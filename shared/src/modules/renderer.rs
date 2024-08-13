@@ -23,12 +23,11 @@ use crate::commands::Commands;
 use crate::display_interface::{ClockDisplayInterface, LayerType, RenderMode};
 use crate::events::Events;
 use crate::message_bus::{BusHandler, BusSender, MessageBus};
-use embedded_graphics::primitives::{PrimitiveStyle, Rectangle, StyledDrawable};
+use embedded_graphics::primitives::{PrimitiveStyle, StyledDrawable};
 use embedded_graphics::{mono_font::MonoTextStyle, prelude::*, primitives};
 use std::collections::{BTreeSet, HashSet};
 use std::f32::consts::PI;
 use std::marker::PhantomData;
-use std::path::Iter;
 use std::sync::Arc;
 use u8g2_fonts::{fonts, U8g2TextStyle};
 
@@ -58,13 +57,18 @@ struct ViewModel {
     battery_level: Option<u16>,
     ble_connected: Option<bool>,
     temperature: Option<f32>,
-    time: Option<OffsetDateTime>,
     calendar_events: BTreeSet<CalendarEvent>,
 
     should_update_events: bool,
     should_reset_events: bool,
 
+    time_vm: TimeViewModel,
+
     mode: VisualMode,
+}
+
+pub struct TimeViewModel {
+    pub time: Option<OffsetDateTime>,
 }
 
 struct EventTagStyle<TColor> {
@@ -148,9 +152,9 @@ impl<TDisplay> Renderer<TDisplay> {
 
 impl<TDisplay> Renderer<TDisplay>
 where
-    TDisplay: ClockDisplayInterface,
+    TDisplay: ClockDisplayInterface + 'static + Send,
 {
-    pub async fn start(bus: MessageBus) {
+    pub async fn start(bus: MessageBus, display: TDisplay, now: Option<OffsetDateTime>) {
         info!("starting...");
 
         let (tx, rx) = channel::<Events>(16);
@@ -158,8 +162,8 @@ where
         let context = Context { tx, pause: false };
 
         let message_bus = bus.clone();
-        let render_loop_task = tokio::task::spawn_blocking(|| {
-            Self::render_loop(message_bus, rx);
+        let render_loop_task = tokio::task::spawn_blocking(move || {
+            Self::render_loop(message_bus, rx, display, now);
         });
 
         MessageBus::handle::<Context, Self>(bus, context).await;
@@ -171,7 +175,7 @@ where
         info!("done.");
     }
 
-    fn render_datetime(frame: &mut TDisplay::FrameBuffer<'_>, vm: &ViewModel) {
+    pub fn render_datetime(frame: &mut TDisplay::FrameBuffer<'_>, vm: &TimeViewModel) {
         if vm.time.is_none() {
             return;
         }
@@ -285,7 +289,10 @@ where
         }
     }
 
-    fn render_time(frame: &mut TDisplay::FrameBuffer<'_>, vm: &ViewModel) -> primitives::Rectangle {
+    fn render_time(
+        frame: &mut TDisplay::FrameBuffer<'_>,
+        vm: &TimeViewModel,
+    ) -> primitives::Rectangle {
         let time_template = format_description!(version = 2, "[hour repr:24]:[minute]:[second]");
 
         let time_text_style =
@@ -306,7 +313,7 @@ where
 
     fn render_day(
         frame: &mut TDisplay::FrameBuffer<'_>,
-        vm: &ViewModel,
+        vm: &TimeViewModel,
         time_text_bounds: &primitives::Rectangle,
     ) {
         let day_template = format_description!(version = 2, "[weekday repr:short]");
@@ -328,7 +335,7 @@ where
         );
     }
 
-    fn draw_arrow(frame: &mut TDisplay::FrameBuffer<'_>, vm: &ViewModel) {
+    fn draw_arrow(frame: &mut TDisplay::FrameBuffer<'_>, vm: &TimeViewModel) {
         let now = vm.time.unwrap();
 
         let zero_time = Time::from_hms(0, 0, 0).unwrap();
@@ -442,10 +449,15 @@ where
         };
     }
 
-    fn render_loop(bus: MessageBus, mut rx: Receiver<Events>) {
+    fn render_loop(
+        bus: MessageBus,
+        mut rx: Receiver<Events>,
+        display_param: TDisplay,
+        now: Option<OffsetDateTime>,
+    ) {
         info!("renderer loop started");
 
-        let mut display = TDisplay::create();
+        let mut display = display_param; //TDisplay::create();
 
         info!("display initialized");
 
@@ -454,11 +466,11 @@ where
             is_charging: None,
             ble_connected: None,
             temperature: None,
-            time: None,
             calendar_events: BTreeSet::new(),
             should_update_events: true,
             should_reset_events: false,
             mode: VisualMode::Normal,
+            time_vm: TimeViewModel { time: now },
             is_past_first_frame: false,
         };
 
@@ -521,7 +533,7 @@ where
 
         match event {
             Events::TimeNow(now) => {
-                view_model.time = Some(now);
+                view_model.time_vm.time = Some(now);
             }
             Events::Temperature(tmpr) => {
                 view_model.temperature = Some(tmpr);
@@ -562,7 +574,7 @@ where
             }
         }
 
-        if let Some(now) = view_model.time {
+        if let Some(now) = view_model.time_vm.time {
             view_model.calendar_events.retain(|x| x.end >= now);
         }
 
@@ -605,7 +617,7 @@ where
                     VisualMode::Normal => {
                         Self::render_battery_level(&mut frame, vm);
                         Self::render_ble_connected(&mut frame, vm);
-                        Self::render_datetime(&mut frame, vm);
+                        Self::render_datetime(&mut frame, &vm.time_vm);
                         Self::render_temperature(&mut frame, vm);
                     }
                     VisualMode::Details => {
@@ -628,7 +640,7 @@ where
     }
 
     fn render_current_events_details(frame: &mut TDisplay::FrameBuffer<'_>, vm: &mut ViewModel) {
-        let now = vm.time.unwrap();
+        let now = vm.time_vm.time.unwrap();
 
         let current_events = vm
             .calendar_events
@@ -671,7 +683,7 @@ where
     }
 
     fn render_events(frame: &mut TDisplay::FrameBuffer<'_>, vm: &mut ViewModel) {
-        if vm.time.is_none() {
+        if vm.time_vm.time.is_none() {
             return;
         }
 
@@ -683,7 +695,7 @@ where
             frame.clear(TDisplay::ColorModel::default()).unwrap();
         }
 
-        let now = vm.time.unwrap();
+        let now = vm.time_vm.time.unwrap();
 
         debug!("rendering {} events...", vm.calendar_events.len());
 
