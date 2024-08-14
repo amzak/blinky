@@ -25,6 +25,12 @@ impl<'a> Rtc<'a> {
     pub fn get_now_utc(&mut self) -> PrimitiveDateTime {
         let datetime_rtc = self.rtc.get_datetime().unwrap();
 
+        let seconds = if datetime_rtc.seconds > 59 {
+            59 // workaround for 60 seconds case
+        } else {
+            datetime_rtc.seconds
+        };
+
         info!("now from rtc {:?}", datetime_rtc);
 
         let datetime = Date::from_calendar_date(
@@ -33,11 +39,7 @@ impl<'a> Rtc<'a> {
             datetime_rtc.day,
         )
         .unwrap()
-        .with_hms(
-            datetime_rtc.hours,
-            datetime_rtc.minutes,
-            datetime_rtc.seconds,
-        )
+        .with_hms(datetime_rtc.hours, datetime_rtc.minutes, seconds)
         .unwrap();
 
         datetime
