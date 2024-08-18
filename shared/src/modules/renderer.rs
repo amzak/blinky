@@ -591,7 +591,7 @@ where
 
         if render_layers_mask.contains(LayerType::Static) {
             display.render(LayerType::Static, RenderMode::Invalidate, |mut frame| {
-                let watchface_data = include_bytes!("../../assets/blinky_watchface_2.tga");
+                let watchface_data = include_bytes!("../../assets/blinky_watchface_magic_eye.tga");
                 let tga: Tga<Rgb555> = Tga::from_slice(watchface_data).unwrap();
 
                 let watchface = tga.pixels().filter_map(|x| {
