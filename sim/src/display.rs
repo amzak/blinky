@@ -25,6 +25,8 @@ pub struct SimDisplay {
     window: Window,
 }
 
+unsafe impl Send for SimDisplay {}
+
 impl ClockDisplayInterface for SimDisplay {
     type Error = Infallible;
 

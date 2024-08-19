@@ -205,7 +205,6 @@ where
         let top_left = Point::new(width as i32, width as i32);
 
         let width = 5;
-        let half_width = width / 2;
 
         let value: RawU16 = Rgb565::CSS_LIGHT_SLATE_GRAY.into();
         let style = PrimitiveStyle::with_stroke(TDisplay::ColorModel::from(value), width);
@@ -393,18 +392,106 @@ where
             return;
         }
 
-        let text = format!("{}{}", vm.temperature.unwrap(), char::from(176));
-
-        let style_time = MonoTextStyle::new(
-            &embedded_graphics::mono_font::iso_8859_3::FONT_8X13,
-            TDisplay::ColorModel::WHITE,
+        let text = format!(
+            "{}{}",
+            char::from_u32(0xe0c0 + 14).unwrap(),
+            vm.temperature.unwrap()
         );
+
+        let style_time = U8g2TextStyle::new(fonts::u8g2_font_siji_t_6x10, RgbColor::WHITE);
 
         Graphics::<TDisplay>::text_aligned(
             frame,
             &text,
-            Point::new(124, 140),
+            Point::new(120, 140),
             style_time,
+            embedded_graphics::text::Alignment::Center,
+        );
+    }
+
+    pub fn try_render_next_event_alert(
+        frame: &mut TDisplay::FrameBuffer<'_>,
+        vm: &ViewModel,
+    ) -> bool {
+        let duration_to_next = Self::try_get_duration_to_next(vm);
+
+        if duration_to_next.is_none() {
+            return false;
+        }
+
+        let now = vm.time_vm.time.unwrap();
+
+        Self::render_duration_to_next(frame, &now, duration_to_next.unwrap());
+
+        return true;
+    }
+
+    fn try_get_duration_to_next(vm: &ViewModel) -> Option<Duration> {
+        if vm.time_vm.time.is_none() {
+            return None;
+        }
+
+        let scope_min = Duration::minutes(30);
+        let mut half_a_day = Duration::hours(12);
+        let ignore_sec = Duration::seconds(5);
+
+        let mut duration_candidates = 0;
+
+        let now = vm.time_vm.time.unwrap();
+
+        for event in vm.calendar_events.iter() {
+            if event.end - now > half_a_day {
+                continue;
+            }
+
+            let till_start = event.start - now;
+
+            if till_start > ignore_sec
+                && till_start < scope_min
+                && half_a_day > till_start
+                && event.start > now
+            {
+                half_a_day = till_start;
+                duration_candidates += 1;
+            }
+        }
+
+        if duration_candidates == 0 {
+            return None;
+        }
+
+        Some(half_a_day)
+    }
+
+    fn render_duration_to_next(
+        frame: &mut TDisplay::FrameBuffer<'_>,
+        now: &OffsetDateTime,
+        duration: Duration,
+    ) {
+        let color = if duration < Duration::minutes(5) {
+            RgbColor::RED
+        } else {
+            RgbColor::WHITE
+        };
+
+        let text_style = U8g2TextStyle::new(fonts::u8g2_font_siji_t_6x10, color);
+
+        let text = format!(
+            "{}'{}{}",
+            duration.whole_minutes(),
+            char::from_u32(0xe120 + 13).unwrap(),
+            char::from_u32(0xe220 + 7).unwrap()
+        );
+
+        let half_width = TDisplay::FRAME_BUFFER_SIDE as i32 / 2;
+
+        let top_left = Point::new(120, 140);
+
+        Graphics::<TDisplay>::text_aligned(
+            frame,
+            &text,
+            top_left,
+            text_style,
             embedded_graphics::text::Alignment::Center,
         );
     }
@@ -618,7 +705,9 @@ where
                         Self::render_battery_level(&mut frame, vm);
                         Self::render_ble_connected(&mut frame, vm);
                         Self::render_datetime(&mut frame, &vm.time_vm);
-                        Self::render_temperature(&mut frame, vm);
+                        if !Self::try_render_next_event_alert(&mut frame, vm) {
+                            Self::render_temperature(&mut frame, vm);
+                        }
                     }
                     VisualMode::Details => {
                         Self::render_current_events_details(&mut frame, vm);
@@ -800,7 +889,7 @@ where
             TDisplay::ColorModel::from(RawU16::from_u32(event.color))
         };
 
-        Self::render_time_range_arc(frame, &now, &event.start, &event.end, color);
+        Self::render_time_range_arc(frame, &now, &event.start, &event.end, 238, 4, color);
 
         let event_start_rel = Duration::ZERO;
 
@@ -819,6 +908,8 @@ where
         now: &OffsetDateTime,
     ) {
         for event in events {
+            let till_start = event.start - *now;
+
             Self::render_todays_event(frame, &event, &now);
         }
     }
@@ -836,7 +927,7 @@ where
             TDisplay::ColorModel::from(RawU16::from_u32(event.color))
         };
 
-        Self::render_time_range_arc(frame, &now, &event.start, &event.end, color);
+        Self::render_time_range_arc(frame, &now, &event.start, &event.end, 238, 4, color);
 
         let event_start_rel = event.start - now;
 
@@ -854,6 +945,8 @@ where
         now: &OffsetDateTime,
         start: &OffsetDateTime,
         end: &OffsetDateTime,
+        diameter: u32,
+        thickness: u8,
         color: TDisplay::ColorModel,
     ) {
         let event_start_rel = if start > now {
@@ -874,19 +967,22 @@ where
 
         let angle_sweep = end_angle - start_angle;
 
-        let style = PrimitiveStyle::with_stroke(color, 4);
+        let style = PrimitiveStyle::with_stroke(color, thickness as u32);
 
         let three_quaters = Angle::from_degrees(90.0);
         let start = start_angle - three_quaters;
 
-        let top_left = Point::new(2, 2);
+        let top_left = Point::new(
+            (TDisplay::FRAME_BUFFER_SIDE as i32 - diameter as i32) / 2,
+            (TDisplay::FRAME_BUFFER_SIDE as i32 - diameter as i32) / 2,
+        );
 
         debug!("arc from {:?} sweep {:?}", start, angle_sweep);
 
         if angle_sweep > Angle::from_degrees(1.0) {
             primitives::Arc::new(
                 top_left,
-                TDisplay::FRAME_BUFFER_SIDE as u32 - top_left.x as u32 * 2,
+                diameter, //TDisplay::FRAME_BUFFER_SIDE as u32 - top_left.x as u32 * 2,
                 start,
                 angle_sweep,
             )

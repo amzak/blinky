@@ -5,6 +5,7 @@ use std::ops::Add;
 use std::sync::Arc;
 
 use blinky_shared::calendar::{CalendarEvent, CalendarEventKey, CalendarKind};
+use blinky_shared::display_interface::ClockDisplayInterface;
 use blinky_shared::events::Events;
 use blinky_shared::message_bus::MessageBus;
 use blinky_shared::{commands::Commands, modules::renderer::Renderer};
@@ -29,7 +30,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_time()
         .worker_threads(1)
-        //.thread_stack_size(40 * 1024)
         .build()?;
 
     rt.block_on(main_async())?;
@@ -41,7 +41,9 @@ async fn main_async() -> Result<(), Box<dyn std::error::Error>> {
 
     let message_bus_clone = message_bus.clone();
 
-    let renderer_task = Renderer::<SimDisplay>::start(message_bus_clone);
+    let display = SimDisplay::create();
+
+    let renderer_task = Renderer::<SimDisplay>::start(message_bus_clone, display, None);
 
     let message_bus_clone = message_bus.clone();
     tokio::task::spawn_blocking(move || {
@@ -95,32 +97,15 @@ async fn main_async() -> Result<(), Box<dyn std::error::Error>> {
         let sample_event = CalendarEvent {
             id: 2,
             kind: CalendarKind::Phone,
-            start: event_start_time + duration * 3,
-            end: event_start_time + duration * 4,
+            start: event_start_time + Duration::from_mins(6),
+            end: event_start_time + Duration::from_mins(60),
             title: "qqq".to_string(),
             description: "description".to_string(),
             icon: blinky_shared::calendar::CalendarEventIcon::Car,
             color: 0,
         };
 
-        //message_bus.send_event(Events::CalendarEvent(sample_event.clone()));
-
-        /*
-        for i in 1..40 {
-            let offset: u64 = i * 60 * 20;
-
-            events_sender
-                .send(Events::CalendarEvent(CalendarEvent {
-                    id: i as i64,
-                    start: start_time_utc + Duration::from_secs(offset),
-                    end: start_time_utc + Duration::from_secs(offset + 300),
-                    title: "qqq".to_string(),
-                    icon: blinky_shared::calendar::CalendarEventIcon::Default,
-                    color: 0,
-                }))
-                .unwrap();
-        }
-         */
+        message_bus.send_event(Events::CalendarEvent(sample_event.clone()));
 
         let mut toggler = false;
 
@@ -128,16 +113,6 @@ async fn main_async() -> Result<(), Box<dyn std::error::Error>> {
             sleep(Duration::from_millis(1000)).await;
 
             message_bus.send_event(Events::TimeNow(now));
-
-            if (toggler) {
-                message_bus.send_event(Events::CalendarEvent(sample_event.clone()));
-            } else {
-                let events = Arc::new(vec![sample_event.key()]);
-
-                message_bus.send_event(Events::DropCalendarEventsBatch(events));
-
-                message_bus.send_event(Events::Key1Press);
-            }
 
             toggler = !toggler;
 
