@@ -6,7 +6,7 @@ use esp_idf_hal::i2c::I2cDriver;
 use time::{OffsetDateTime, UtcOffset};
 
 use crate::peripherals::{
-    backlight::Backlight, display::ClockDisplay, hal::HalConfig, i2c_proxy_async::I2cProxyAsync,
+    display::ClockDisplay, hal::HalConfig, i2c_proxy_async::I2cProxyAsync, output::PinOutput,
     rtc::Rtc, rtc_memory::UTC_OFFSET,
 };
 
@@ -31,7 +31,7 @@ impl RtcDisplayFastTrack {
         config: HalConfig,
         i2c_proxy: I2cProxyAsync<I2cDriver<'a>>,
     ) -> FastTrackResult<'a> {
-        let _ = Backlight::create(config.backlight, true);
+        let _ = PinOutput::create(config.backlight, true);
 
         let mut rtc = Rtc::create(i2c_proxy);
         let mut display = ClockDisplay::create();

@@ -16,6 +16,7 @@ pub enum Events {
     Wakeup(WakeupCause),
     TouchOrMove,
     Key1Press,
+    Key2Press,
     TouchPos(TouchPosition),
     IncomingData(Arc<Vec<u8>>),
     Temperature(f32),

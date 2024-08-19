@@ -1,6 +1,6 @@
 use crate::peripherals::adc::AdcDevice;
-use crate::peripherals::backlight::Backlight;
 use crate::peripherals::hal::PinConfig;
+use crate::peripherals::output::PinOutput;
 use blinky_shared::domain::WakeupCause;
 use esp_idf_hal::adc::ADC1;
 use esp_idf_hal::gpio::{AnyIOPin, Gpio36, Level, PinDriver, Pull};
@@ -29,7 +29,10 @@ struct Context {
 impl BusHandler<Context> for PowerModule {
     async fn event_handler(bus: &BusSender, context: &mut Context, event: Events) {
         match event {
-            Events::TouchOrMove | Events::Key1Press | Events::BleClientConnected => {
+            Events::TouchOrMove
+            | Events::Key1Press
+            | Events::Key2Press
+            | Events::BleClientConnected => {
                 bus.send_cmd(Commands::ResumeRendering);
                 context.idle_reset.notify_one();
             }
@@ -72,7 +75,7 @@ impl PowerModule {
         info!("done.");
     }
 
-    async fn idle_sequence(bus: MessageBus, mut backlight: Backlight<'_>, token: Arc<Notify>) {
+    async fn idle_sequence(bus: MessageBus, mut backlight: PinOutput<'_>, token: Arc<Notify>) {
         info!("idle_sequence");
         loop {
             info!("started idle sequence...");
@@ -115,8 +118,8 @@ impl PowerModule {
         }
     }
 
-    fn init_backlight(backlight_pin: i32) -> Backlight<'static> {
-        let backlight = Backlight::create(backlight_pin, true);
+    fn init_backlight(backlight_pin: i32) -> PinOutput<'static> {
+        let backlight = PinOutput::create(backlight_pin, true);
 
         backlight
     }
