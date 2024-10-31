@@ -1,0 +1,6 @@
+# Rust often needs a bit of an extra main task stack size compared to C (the default is 3K)
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=8000
+
+CONFIG_IDF_TARGET_ESP32=y
+CONFIG_ESP32_REV_MIN_3=y
+CONFIG_ESP32_DEFAULT_CPU_FREQ_240=y

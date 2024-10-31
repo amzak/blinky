@@ -24,6 +24,7 @@ async fn should_serialize_and_deserialize_persistence_unit() {
         icon: blinky_shared::calendar::CalendarEventIcon::Default,
         color: 0,
         kind: CalendarKind::Phone,
+        description: "".to_string(),
     };
 
     let persistence_unit = PersistenceUnit::new(PersistenceUnitKind::CalendarSyncInfo, &event);

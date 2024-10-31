@@ -32,13 +32,18 @@ pub enum BleCommands {
 }
 
 impl BusHandler<Context> for BleModule {
-    async fn event_handler(_bus: &BusSender, context: &mut Context, event: Events) {
+    async fn event_handler(bus: &BusSender, context: &mut Context, event: Events) {
         match event {
             Events::PersistedCalendarEvents(events) => {
                 context
                     .tx
                     .send(BleCommands::ReplyPersisted(events))
                     .unwrap();
+            }
+            Events::Key2Press => {
+                context.tx.send(BleCommands::StartAdvertising).unwrap();
+                bus.send_cmd(Commands::AbortSleep);
+                bus.send_cmd(Commands::DebugAccel);
             }
             _ => {}
         }

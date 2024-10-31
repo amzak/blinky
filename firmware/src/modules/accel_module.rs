@@ -1,11 +1,11 @@
 use crate::peripherals::accelerometer::Accelerometer;
-use crate::peripherals::i2c_proxy_async::I2cProxyAsync;
 use blinky_shared::message_bus::{BusHandler, BusSender, MessageBus};
 use esp_idf_hal::i2c::I2cDriver;
 use log::{error, info};
 
 use blinky_shared::commands::Commands;
 use blinky_shared::events::Events;
+use peripherals::i2c_proxy_async::I2cProxyAsync;
 
 pub struct AccelerometerModule {}
 
@@ -25,6 +25,10 @@ impl<'a> BusHandler<Context<'a>> for AccelerometerModule {
 
     async fn command_handler(bus: &BusSender, context: &mut Context<'a>, command: Commands) {
         match command {
+            Commands::DebugAccel => {
+                let accel = context.accel.read_accel();
+                info!("accel: {:?}", accel);
+            }
             _ => {}
         }
     }
