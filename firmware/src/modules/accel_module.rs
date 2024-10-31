@@ -16,7 +16,7 @@ struct Context<'a> {
 impl<'a> BusHandler<Context<'a>> for AccelerometerModule {
     async fn event_handler(bus: &BusSender, context: &mut Context<'a>, event: Events) {
         match event {
-            Events::TouchOrMove => {
+            Events::SharedInterrupt => {
                 Self::read_interrupt_status(&mut context.accel).await;
             }
             _ => {}

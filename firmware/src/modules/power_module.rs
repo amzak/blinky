@@ -29,7 +29,7 @@ struct Context {
 impl BusHandler<Context> for PowerModule {
     async fn event_handler(bus: &BusSender, context: &mut Context, event: Events) {
         match event {
-            Events::TouchOrMove
+            Events::SharedInterrupt
             | Events::Key1Press
             | Events::Key2Press
             | Events::BleClientConnected => {

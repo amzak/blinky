@@ -44,8 +44,8 @@ impl UserInput {
 
         loop {
             select! {
-                Ok(_) = pin_touch.wait_for_falling_edge() => {
-                    bus.send_event(Events::TouchOrMove);
+                Ok(_) = pin_touch.wait_for_low() => {
+                    bus.send_event(Events::SharedInterrupt);
                 }
                 Ok(_) = pin_key1.wait_for_low() => {
                     bus.send_event(Events::Key1Press);

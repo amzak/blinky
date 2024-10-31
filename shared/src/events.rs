@@ -14,7 +14,7 @@ pub enum Events {
     ReferenceData(ReferenceData),
     ReferenceTime(OffsetDateTime),
     Wakeup(WakeupCause),
-    TouchOrMove,
+    SharedInterrupt, // touch, accelerometer, rtc alarm
     Key1Press,
     Key2Press,
     TouchPos(TouchPosition),
