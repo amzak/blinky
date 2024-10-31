@@ -60,12 +60,13 @@ struct ViewModel {
     temperature: Option<f32>,
     calendar_events: BTreeSet<CalendarEvent>,
 
-    should_update_events: bool,
-    should_reset_events: bool,
+    force_render_events: bool,
 
     time_vm: TimeViewModel,
 
     mode: VisualMode,
+
+    alarm_counter: i16,
 }
 
 pub struct TimeViewModel {
@@ -143,6 +144,7 @@ impl<TDisplay> Renderer<TDisplay> {
             | Events::CalendarEvent(_)
             | Events::CalendarEventsBatch(_)
             | Events::DropCalendarEventsBatch(_)
+            | Events::Reminder(_)
             | Events::Key1Press => {
                 return true;
             }
@@ -410,6 +412,16 @@ where
         );
     }
 
+    pub fn render_alarm(frame: &mut TDisplay::FrameBuffer<'_>, vm: &ViewModel) {
+        render_event_icon::<TDisplay>(
+            frame,
+            CalendarEventIcon::Alarm,
+            Point::new(120, 145),
+            12,
+            RgbColor::RED,
+        );
+    }
+
     pub fn try_render_next_event_alert(
         frame: &mut TDisplay::FrameBuffer<'_>,
         vm: &ViewModel,
@@ -555,11 +567,11 @@ where
             ble_connected: None,
             temperature: None,
             calendar_events: BTreeSet::new(),
-            should_update_events: true,
-            should_reset_events: false,
+            force_render_events: false,
             mode: VisualMode::Normal,
-            time_vm: TimeViewModel { time: now },
+            time_vm: TimeViewModel { time: rtc_data.now },
             is_past_first_frame: false,
+            alarm_counter: if rtc_data.alarm_status { 10 } else { 0 },
         };
 
         let mut static_rendered = false;
@@ -573,15 +585,23 @@ where
                     tokio::sync::mpsc::error::TryRecvError::Empty => {
                         debug!("render started...");
 
-                        let all = LayerType::Static | LayerType::Clock | LayerType::Events;
-                        let render_layers_mask = if static_rendered {
-                            LayerType::Clock | LayerType::Events
-                        } else {
-                            static_rendered = true;
-                            all
-                        };
+                        let mut render_layers_mask: BitFlags<LayerType> = LayerType::Clock.into();
 
-                        Self::render(&mut display, &mut state, render_layers_mask, all);
+                        if !static_rendered {
+                            render_layers_mask |= LayerType::Static;
+                            static_rendered = true;
+                        }
+
+                        if state.force_render_events {
+                            render_layers_mask |= LayerType::Events;
+                        }
+
+                        Self::render(
+                            &mut display,
+                            &mut state,
+                            render_layers_mask,
+                            LayerType::Static | LayerType::Clock | LayerType::Events,
+                        );
 
                         if !state.is_past_first_frame {
                             info!("first render");
@@ -621,6 +641,12 @@ where
 
         match event {
             Events::TimeNow(now) => {
+                if let Some(time) = view_model.time_vm.time {
+                    if now.minute() != time.minute() {
+                        view_model.force_render_events = true;
+                    }
+                }
+
                 view_model.time_vm.time = Some(now);
             }
             Events::Temperature(tmpr) => {
@@ -656,6 +682,9 @@ where
                 } else {
                     VisualMode::Normal
                 }
+            }
+            Events::Reminder(_reminder) => {
+                view_model.alarm_counter = 10;
             }
             _ => {
                 state_changed = false;
@@ -706,7 +735,11 @@ where
                         Self::render_battery_level(&mut frame, vm);
                         Self::render_ble_connected(&mut frame, vm);
                         Self::render_datetime(&mut frame, &vm.time_vm);
-                        if !Self::try_render_next_event_alert(&mut frame, vm) {
+
+                        if vm.alarm_counter > 0 {
+                            Self::render_alarm(&mut frame, vm);
+                            vm.alarm_counter -= 1;
+                        } else if !Self::try_render_next_event_alert(&mut frame, vm) {
                             Self::render_temperature(&mut frame, vm);
                         }
                     }
@@ -777,17 +810,13 @@ where
             return;
         }
 
-        if !(vm.should_update_events || vm.should_reset_events) {
-            return;
-        }
-
-        if vm.should_reset_events {
+        if vm.force_render_events {
             frame.clear(TDisplay::ColorModel::default()).unwrap();
         }
 
         let now = vm.time_vm.time.unwrap();
 
-        debug!("rendering {} events...", vm.calendar_events.len());
+        info!("rendering {} events...", vm.calendar_events.len());
 
         //const EVENT_TAG_SIZE: usize = 18;
 
@@ -820,7 +849,7 @@ where
 
         Self::render_todays_events(today_events, frame, &now);
 
-        vm.should_update_events = false;
+        vm.force_render_events = false;
     }
 
     fn render_currrent_ambient_events<'a>(
@@ -1079,7 +1108,7 @@ fn append_event(view_model: &mut ViewModel, calendar_event: &CalendarEvent) {
     let new_count = view_model.calendar_events.len();
 
     if updated.is_some() || old_count != new_count {
-        view_model.should_update_events = true;
+        view_model.force_render_events = true;
     }
 }
 
@@ -1098,7 +1127,7 @@ fn drop_events(view_model: &mut ViewModel, events_keys: Arc<Vec<CalendarEventKey
 
     let new_count = view_model.calendar_events.len();
 
-    if old_count != new_count {
-        view_model.should_reset_events = true;
+    if !set.is_empty() {
+        view_model.force_render_events = true;
     }
 }

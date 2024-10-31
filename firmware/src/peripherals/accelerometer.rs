@@ -1,10 +1,12 @@
-use crate::peripherals::bma423ex::{AxesConfig, Bma423Ex, InterruptIOCtlFlags};
-use crate::peripherals::i2c_proxy_async::I2cProxyAsync;
 use blinky_shared::error::Error;
-use bma423::{Bma423, Config, FeatureInterruptStatus, FullPower, InterruptStatus};
+use bma423::{AccelConfigOdr, Bma423, Config, FeatureInterruptStatus, FullPower, InterruptStatus};
 use esp_idf_hal::delay::Ets;
 use esp_idf_hal::i2c::I2cDriver;
 use log::{debug, info, warn};
+use peripherals::{
+    bma423ex::{AxesConfig, Bma423Ex, InterruptIOCtlFlags},
+    i2c_proxy_async::I2cProxyAsync,
+};
 use tokio::time::{sleep, Duration};
 
 pub struct Accelerometer<'a> {
@@ -30,7 +32,11 @@ impl<'a> Accelerometer<'a> {
         let mut accel_base_initialized_opt = None;
 
         loop {
-            let accel_base = Bma423::new_with_address(proxy.clone(), Config::default(), 0x18);
+            let mut config = Config::default();
+
+            config.sample_rate = AccelConfigOdr::Odr12p5;
+
+            let accel_base = Bma423::new_with_address(proxy.clone(), config, 0x18);
             let accel_base_initialized_res = accel_base.init(&mut delay);
 
             match accel_base_initialized_res {
@@ -97,6 +103,9 @@ impl<'a> Accelerometer<'a> {
         self.accel_base.read_interrupt_status().unwrap()
     }
 
+    pub fn read_accel(&mut self) -> (f32, f32, f32) {
+        self.accel_base.accel_norm_int().unwrap()
+    }
     // pub fn get_thermometer(&self) -> Thermometer<'a> {
     //     Thermometer {
     //         accel_ex: Bma423Ex::new(self.proxy.clone()),

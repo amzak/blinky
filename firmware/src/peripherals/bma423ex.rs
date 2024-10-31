@@ -1,5 +1,4 @@
 use bma423::{FeatureInterruptStatus, PowerControlFlag};
-use std::f32;
 
 use bitmask_enum::bitmask;
 use embedded_hal::delay::DelayNs;
@@ -412,6 +411,11 @@ enum Reg {
     InternalStatus = 0x2a,
     Int0Status = 0x1c,
     Temperature = 0x22,
+    FifoLength0 = 0x24,
+    FifoLength1 = 0x25,
+    FifoData = 0x26,
+    FifoConfig0 = 0x48,
+    FifoConfig1 = 0x49,
     Interrupt1IOCtl = 0x53,
     Interrupt2IOCtl = 0x54,
     InterruptMode = 0x55,
@@ -448,6 +452,20 @@ pub enum FeatureOffset {
     AnyMotion = 0x00,
     WristTilt = 0x40,
     AxisRemap = 0x44,
+}
+
+#[bitmask(u8)]
+#[derive(Debug, Clone, Copy, IntoPrimitive)]
+pub enum FifoConfig0Flags {
+    FifoStopOnFull = Self(0b0000_0001),
+    FifoTimeEn = Self(0b0000_0010),
+}
+
+#[bitmask(u8)]
+#[derive(Debug, Clone, Copy, IntoPrimitive)]
+pub enum FifoConfig1Flags {
+    Accelerometer = Self(0b0100_0000),
+    Header = Self(0b0001_0000),
 }
 
 const DEFAULT_ADDRESS: u8 = 0x18;
@@ -679,6 +697,39 @@ impl<I2C: I2c> Bma423Ex<I2C> {
     pub fn reset_and_init(&mut self, delay: &mut impl DelayNs) -> Result<(), I2C::Error> {
         self.soft_reset(delay)?;
         self.init(delay)?;
+        Ok(())
+    }
+
+    pub fn enable_fifo(&mut self) -> Result<(), I2C::Error> {
+        let mut data: [u8; 1] = [0];
+        self.write_read(Reg::FifoConfig1, &mut data)?;
+
+        data[0] = data[0] | u8::from(FifoConfig1Flags::Accelerometer);
+        data[0] = data[0] & !u8::from(FifoConfig1Flags::Header);
+
+        self.write(&[Reg::FifoConfig1.into(), data[0]])?;
+
+        Ok(())
+    }
+
+    pub fn get_fifo_length(&mut self) -> Result<u16, I2C::Error> {
+        let mut data: [u8; 2] = [0, 0];
+        self.write_read(Reg::FifoLength0, &mut data)?;
+
+        Ok(u16::from_be_bytes(data))
+    }
+
+    pub fn read_fifo(&mut self, data: &mut [u8]) -> Result<(), I2C::Error> {
+        self.write_read(Reg::FifoData, data)?;
+
+        Ok(())
+    }
+
+    pub fn clear_fifo(&mut self) -> Result<(), I2C::Error> {
+        let mut data: [u8; 1] = [0xb0];
+
+        self.write_read(Reg::Cmd, &mut data)?;
+
         Ok(())
     }
 }

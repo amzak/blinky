@@ -3,6 +3,7 @@ use std::sync::Arc;
 use crate::calendar::{CalendarEvent, CalendarEventKey};
 use crate::domain::{ReferenceData, TouchPosition, WakeupCause};
 use crate::persistence::PersistenceUnit;
+use crate::reminders::Reminder;
 use strum_macros::AsRefStr;
 use time::OffsetDateTime;
 
@@ -32,5 +33,6 @@ pub enum Events {
     Restored(PersistenceUnit),
     PersistedCalendarEvents(Arc<Vec<CalendarEventKey>>),
     FirstRender,
+    Reminder(Reminder),
     Term,
 }

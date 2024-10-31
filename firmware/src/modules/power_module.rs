@@ -14,7 +14,7 @@ use log::info;
 use std::sync::Arc;
 use tokio::select;
 use tokio::sync::Notify;
-use tokio::time::Duration;
+use tokio::time::{sleep, Duration};
 
 use blinky_shared::commands::Commands;
 use blinky_shared::events::Events;
@@ -24,6 +24,7 @@ pub struct PowerModule {}
 
 struct Context {
     idle_reset: Arc<Notify>,
+    config: PinConfig,
 }
 
 impl BusHandler<Context> for PowerModule {
@@ -35,6 +36,10 @@ impl BusHandler<Context> for PowerModule {
             | Events::BleClientConnected => {
                 bus.send_cmd(Commands::ResumeRendering);
                 context.idle_reset.notify_one();
+            }
+            Events::Reminder(reminder) => {
+                context.idle_reset.notify_one();
+                Self::signal_reminder(&context.config, 3).await;
             }
             _ => {}
         }
@@ -51,9 +56,6 @@ impl PowerModule {
     pub async fn start(adc: ADC1, gpio36: Gpio36, config: PinConfig, bus: MessageBus) {
         info!("starting...");
 
-        // Self::announce_wakeup_cause(&bus).await;
-        // Self::announce_battery_level(&bus, adc, gpio36).await;
-
         let backlight = Self::init_backlight(config.backlight);
         let idle_reset = Arc::new(Notify::new());
 
@@ -63,10 +65,20 @@ impl PowerModule {
             idle_reset.clone(),
         ));
 
-        let context = Context { idle_reset };
+        let wakeup_cause = Self::get_wakeup_cause().await;
+        Self::announce_wakeup_cause(&bus, &wakeup_cause);
 
-        Self::announce_wakeup_cause(&bus).await;
-        Self::announce_battery_level(&bus, adc, gpio36).await;
+        if matches!(wakeup_cause, WakeupCause::Undef) {
+            Self::signal_reminder(&config, 2).await;
+        }
+
+        let mut adc_device = AdcDevice::new(adc, gpio36);
+
+        Self::announce_battery_level(&bus, &mut adc_device);
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        Self::announce_battery_level(&bus, &mut adc_device);
+
+        let context = Context { idle_reset, config };
 
         MessageBus::handle::<Context, Self>(bus, context).await;
 
@@ -217,20 +229,34 @@ impl PowerModule {
         return percent as u16;
     }
 
-    async fn announce_wakeup_cause(bus: &MessageBus) {
-        let wakeup_cause = Self::get_wakeup_cause().await;
+    fn announce_wakeup_cause(bus: &MessageBus, wakeup_cause: &WakeupCause) {
         info!("startup wakeup cause {:?}", wakeup_cause);
-        bus.send_event(Events::Wakeup(wakeup_cause));
+        bus.send_event(Events::Wakeup(wakeup_cause.clone()));
     }
 
-    async fn announce_battery_level(bus: &MessageBus, adc: ADC1, gpio36: Gpio36) {
-        let mut adc_device = AdcDevice::new(adc, gpio36);
-        let adc_value = adc_device.read();
+    fn announce_battery_level(bus: &MessageBus, adc: &mut AdcDevice) {
+        let adc_value = adc.read();
         info!("adc {:?}", adc_value);
 
-        bus.send_event(Events::BatteryLevel(Self::convert_to_percent(adc_value)));
-
         let is_charging = Self::is_charging();
-        bus.send_event(Events::Charging(is_charging));
+
+        if is_charging {
+            bus.send_event(Events::Charging(is_charging));
+        } else {
+            bus.send_event(Events::BatteryLevel(Self::convert_to_percent(adc_value)));
+        }
+    }
+
+    async fn signal_reminder(config: &PinConfig, count: i8) {
+        let mut vibro = PinOutput::create(config.vibro, true);
+
+        for i in 0..count - 1 {
+            if i != 0 {
+                sleep(Duration::from_millis(300)).await;
+                vibro.on();
+            }
+            sleep(Duration::from_millis(400)).await;
+            vibro.off();
+        }
     }
 }

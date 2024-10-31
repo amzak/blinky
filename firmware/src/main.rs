@@ -10,7 +10,6 @@ use blinky_shared::fasttrack::FastTrackRtcData;
 use blinky_shared::message_bus::MessageBus;
 use blinky_shared::modules::renderer::Renderer;
 use blinky_shared::persistence::PersistenceUnitKind;
-use esp_idf_hal::i2c::I2cDriver;
 use esp_idf_hal::peripherals::Peripherals;
 use esp_idf_svc::log::{set_target_level, EspLogger};
 use log::*;
@@ -19,7 +18,6 @@ use peripherals::rtc::Rtc;
 use std::future::Future;
 use std::pin::Pin;
 use std::thread;
-use time::OffsetDateTime;
 
 extern crate blinky_shared;
 
@@ -86,7 +84,10 @@ async fn main_async() -> Result<(), Box<dyn std::error::Error>> {
         touch_reset_pin: 33,
     };
 
-    let pin_conf = PinConfig { backlight: 21 };
+    let pin_conf = PinConfig {
+        backlight: 21,
+        vibro: 4,
+    };
 
     let message_bus = MessageBus::new();
 

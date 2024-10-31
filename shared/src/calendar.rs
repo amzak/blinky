@@ -2,7 +2,7 @@ use std::hash::{Hash, Hasher};
 
 use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
-use time::{OffsetDateTime, UtcOffset};
+use time::{Duration, OffsetDateTime, UtcOffset};
 
 use crate::domain::ReferenceTimeUtc;
 
@@ -17,6 +17,8 @@ pub enum CalendarEventIcon {
     Train = 5,
     Car = 6,
     Rain = 7,
+    CalendarAlert = 8,
+    Alarm = 9,
 }
 
 #[derive(Debug, Serialize_repr, Deserialize_repr, PartialEq, Clone, Copy, Hash)]
@@ -26,6 +28,14 @@ pub enum CalendarKind {
     Phone = 1,
     Trains = 2,
     Weather = 3,
+}
+
+#[derive(Debug, Serialize_repr, Deserialize_repr, PartialEq, Clone, Copy, Hash)]
+#[repr(u8)]
+pub enum CalendarEventRemainderStatus {
+    Disabled = 0,
+    Planned = 1,
+    Passed = 2,
 }
 
 #[derive(Clone, Debug)]
@@ -39,6 +49,9 @@ pub struct CalendarEvent {
     pub color: u32,
     pub description: String,
 }
+
+#[derive(Debug)]
+pub struct CalendarEventOrderedByStartAsc(pub CalendarEvent);
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub struct CalendarEventDto {
@@ -104,22 +117,38 @@ impl PartialOrd for CalendarEvent {
     }
 }
 
+impl Ord for CalendarEventOrderedByStartAsc {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.0.start.cmp(&other.0.start)
+    }
+}
+
+impl PartialOrd for CalendarEventOrderedByStartAsc {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.0.cmp(&other.0))
+    }
+}
+
 impl CalendarEvent {
-    pub fn new(dto: CalendarEventDto, tz: UtcOffset) -> CalendarEvent {
+    pub fn new(dto: &CalendarEventDto, tz: UtcOffset) -> CalendarEvent {
         CalendarEvent {
             id: dto.id as i32,
             kind: dto.kind,
-            start: dto.start.to_offset_dt(tz),
-            end: dto.end.to_offset_dt(tz),
-            title: dto.title,
+            start: dto.start.clone().to_offset_dt(tz),
+            end: dto.end.clone().to_offset_dt(tz),
+            title: dto.title.clone(),
             icon: dto.icon,
             color: dto.color,
-            description: dto.description,
+            description: dto.description.clone(),
         }
     }
 
     pub fn key(&self) -> CalendarEventKey {
         CalendarEventKey(self.kind, self.id)
+    }
+
+    pub fn duration(&self) -> Duration {
+        self.end - self.start
     }
 }
 
@@ -147,3 +176,11 @@ impl PartialEq<Self> for CalendarEvent {
 impl Eq for CalendarEvent {}
 
 impl Eq for CalendarEventKey {}
+
+impl PartialEq<Self> for CalendarEventOrderedByStartAsc {
+    fn eq(&self, other: &Self) -> bool {
+        self.0.id == other.0.id
+    }
+}
+
+impl Eq for CalendarEventOrderedByStartAsc {}

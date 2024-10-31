@@ -5,8 +5,6 @@ pub mod adc;
 pub mod bma423ex;
 pub mod display;
 pub mod hal;
-pub mod i2c_management;
-pub mod i2c_proxy_async;
 pub mod nvs_storage;
 pub mod output;
 pub mod rtc;

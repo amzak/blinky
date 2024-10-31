@@ -1,9 +1,9 @@
-use crate::peripherals::i2c_management::I2cManagement;
-use crate::peripherals::i2c_proxy_async::I2cProxyAsync;
 use crate::peripherals::touchpad::TouchpadConfig;
 use esp_idf_hal::gpio::{Gpio25, Gpio26, IOPin};
 use esp_idf_hal::i2c::{I2cConfig, I2cDriver, I2C0};
 use esp_idf_hal::units::FromValueType;
+use peripherals::i2c_management::I2cManagement;
+use peripherals::i2c_proxy_async::I2cProxyAsync;
 
 pub struct HAL<'d> {
     i2c_manager: I2cManagement<'d>,
@@ -19,6 +19,7 @@ pub struct HalConfig {
 
 pub struct PinConfig {
     pub backlight: i32,
+    pub vibro: i32,
 }
 
 impl<'d> HAL<'d> {

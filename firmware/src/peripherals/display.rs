@@ -4,7 +4,7 @@ use embedded_graphics::pixelcolor::{Rgb565, RgbColor};
 use embedded_graphics::prelude::{DrawTarget, *};
 use embedded_graphics::primitives::Rectangle;
 use embedded_graphics_framebuf::FrameBuf;
-use enumflags2::{BitFlag, BitFlags};
+use enumflags2::BitFlags;
 use esp_idf_hal::delay::Ets;
 use esp_idf_hal::gpio::{AnyIOPin, Gpio13, Gpio14, Gpio15, Gpio19, Gpio27, InputOutput, PinDriver};
 use esp_idf_hal::spi;
@@ -24,11 +24,8 @@ use crate::peripherals::GC9A01_NOINIT::Gc9a01Noinit;
 
 pub type EspSpi1InterfaceNoCS<'d> =
     SPIInterface<SpiSingleDeviceDriver<'d>, PinDriver<'d, Gpio19, InputOutput>>;
-pub type DisplaySPI2<'d> = Display<
-    EspSpi1InterfaceNoCS<'d>,
-    impl Model<ColorFormat = Rgb565>,
-    PinDriver<'d, Gpio27, InputOutput>,
->;
+pub type DisplaySPI2<'d> =
+    Display<EspSpi1InterfaceNoCS<'d>, Gc9a01Noinit, PinDriver<'d, Gpio27, InputOutput>>;
 
 pub struct ClockDisplay<'a> {
     display: DisplaySPI2<'a>,

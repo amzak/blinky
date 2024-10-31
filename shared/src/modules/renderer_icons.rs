@@ -3,7 +3,7 @@ use embedded_graphics::geometry::Point;
 use crate::{calendar::CalendarEventIcon, display_interface::ClockDisplayInterface};
 use embedded_icon::{
     mdi::{
-        size12px as small_mdi_icons,
+        size12px as small_mdi_icons, size18px as big_mdi_icons,
         size18px::{
             Battery10, Battery20, Battery30, Battery40, Battery50, Battery60, Battery70, Battery90,
             BatteryHigh, BatteryLow,
@@ -56,6 +56,14 @@ pub fn render_event_icon<TDisplay: ClockDisplayInterface>(
             center,
             &small_mdi_icons::WeatherRainy::new(color),
         ),
+        CalendarEventIcon::CalendarAlert => Graphics::<TDisplay>::icon_center(
+            frame,
+            center,
+            &small_mdi_icons::CalendarAlert::new(color),
+        ),
+        CalendarEventIcon::Alarm => {
+            Graphics::<TDisplay>::icon_center(frame, center, &big_mdi_icons::ClockAlert::new(color))
+        }
         _ => {
             Graphics::<TDisplay>::icon_center(frame, center, &small_mdi_icons::Calendar::new(color))
         }

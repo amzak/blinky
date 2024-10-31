@@ -4,8 +4,7 @@ use esp_idf_hal::delay::Ets;
 use esp_idf_hal::gpio::{AnyIOPin, Input, Output, PinDriver};
 use esp_idf_hal::i2c::I2cDriver;
 use log::debug;
-
-use crate::peripherals::i2c_proxy_async::I2cProxyAsync;
+use peripherals::i2c_proxy_async::I2cProxyAsync;
 
 pub type TouchpadDevice<'d> = CST816S<
     Reverse<I2cProxyAsync<I2cDriver<'d>>>,

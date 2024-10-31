@@ -1,8 +1,10 @@
+use std::collections::BTreeSet;
+
+use blinky_shared::reminders::Reminder;
 use log::info;
 use time::{PrimitiveDateTime, UtcOffset};
 use tokio::select;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
-use tokio::sync::watch;
 use tokio::time::MissedTickBehavior;
 
 use crate::peripherals::rtc::Rtc;
@@ -35,15 +37,13 @@ impl RtcModule {
         info!("starting...");
         let (tx_rtc, rx_rtc) = channel::<Commands>(10);
 
-        let (tx_timer, rx_timer) = watch::channel(true);
-
         let bus_clone = bus.clone();
 
         let rtc_task = tokio::task::spawn_blocking(move || {
-            Self::rtc_loop(bus_clone, rx_rtc, tx_timer, rtc);
+            Self::rtc_loop(bus_clone, rx_rtc, rtc);
         });
 
-        let timer = tokio::spawn(Self::run_timer(rx_timer, tx_rtc.clone()));
+        let timer = tokio::spawn(Self::run_timer(tx_rtc.clone()));
 
         let context = Context { tx_rtc };
 
@@ -56,26 +56,17 @@ impl RtcModule {
         info!("done.");
     }
 
-    fn rtc_loop(
-        bus: MessageBus,
-        mut rx: Receiver<Commands>,
-        tx_timer: tokio::sync::watch::Sender<bool>,
-        rtc_param: Rtc,
-    ) {
-        let mut timezone: UtcOffset = UtcOffset::from_whole_seconds(0).unwrap();
+    fn rtc_loop(bus: MessageBus, mut rx: Receiver<Commands>, rtc_param: Rtc) {
+        let mut reminders: BTreeSet<Reminder> = BTreeSet::new();
+
+        let mut timezone: UtcOffset = Self::get_timezone();
 
         let mut rtc = rtc_param;
 
-        let utc_offset = unsafe {
-            if UTC_OFFSET.is_none() {
-                timezone
-            } else {
-                UTC_OFFSET.unwrap()
-            }
-        };
-
-        let datetime = rtc.get_now_utc().assume_offset(utc_offset);
+        let datetime = rtc.get_now_utc().assume_offset(timezone);
         bus.send_event(Events::TimeNow(datetime));
+
+        let mut is_paused = false;
 
         loop {
             let command_opt = rx.blocking_recv();
@@ -83,8 +74,36 @@ impl RtcModule {
             match command_opt {
                 Some(command) => match command {
                     Commands::GetTimeNow => {
-                        let datetime = rtc.get_now_utc().assume_offset(utc_offset);
-                        bus.send_event(Events::TimeNow(datetime));
+                        let now = rtc.get_now_utc().assume_offset(timezone);
+
+                        if !is_paused {
+                            bus.send_event(Events::TimeNow(now));
+                        }
+
+                        loop {
+                            let first_opt = reminders.first();
+
+                            if first_opt.is_none() {
+                                break;
+                            }
+
+                            let remind_at = first_opt.unwrap().remind_at;
+                            if now < remind_at {
+                                break;
+                            }
+
+                            let first = reminders.pop_first();
+
+                            if now >= remind_at {
+                                bus.send_event(Events::Reminder(first.unwrap()));
+                            }
+                        }
+                    }
+                    Commands::SetReminders(mut reminders_param) => {
+                        for reminder in reminders_param.drain(..) {
+                            info!("set reminder {:?}", reminder);
+                            reminders.insert(reminder);
+                        }
                     }
                     Commands::SetTime(time) => {
                         let offset_utc = time.offset();
@@ -105,14 +124,20 @@ impl RtcModule {
                             UTC_OFFSET = Some(timezone);
                         }
                     }
+                    Commands::SetRtcAlert(alert_at) => {
+                        rtc.set_alarm(alert_at);
+
+                        info!("set rtc alert for {}", alert_at);
+                    }
+                    Commands::ResetRtcAlert => rtc.reset_alarm(),
                     Commands::PauseRendering => {
-                        tx_timer.send(true).unwrap();
+                        is_paused = true;
                     }
                     Commands::ResumeRendering => {
-                        tx_timer.send(false).unwrap();
+                        is_paused = false;
                     }
                     Commands::StartDeepSleep => {
-                        tx_timer.send(true).unwrap();
+                        is_paused = false;
                         break;
                     }
                     _ => {}
@@ -124,31 +149,29 @@ impl RtcModule {
         info!("rtc loop done.")
     }
 
-    async fn run_timer(pause_param: watch::Receiver<bool>, tx: Sender<Commands>) {
-        let mut pause = pause_param;
-
+    async fn run_timer(tx: Sender<Commands>) {
         let mut interval = tokio::time::interval(core::time::Duration::from_secs(1));
         interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
-
-        let mut pause_flag = false;
 
         info!("timer loop started");
 
         loop {
             select! {
-                Ok(_) = pause.changed() => {
-                    let val = pause.borrow_and_update();
-                    pause_flag = *val;
-                }
                 _ = interval.tick() => {
-                    if pause_flag {
-                        info!("pause");
-                        continue;
-                    }
-
                     tx.send(Commands::GetTimeNow).await.unwrap();
                 }
             }
         }
+    }
+
+    fn get_timezone() -> UtcOffset {
+        let utc_offset = unsafe {
+            if UTC_OFFSET.is_none() {
+                UtcOffset::from_whole_seconds(0).unwrap()
+            } else {
+                UTC_OFFSET.unwrap()
+            }
+        };
+        utc_offset
     }
 }

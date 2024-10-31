@@ -264,7 +264,7 @@ impl ReferenceTime {
                     rmp_serde::from_slice(&x.packet_payload);
 
                 match res {
-                    Ok(event_dto) => Some(CalendarEvent::new(event_dto.calendar_event, offset)),
+                    Ok(event_dto) => Some(CalendarEvent::new(&event_dto.calendar_event, offset)),
                     Err(err) => {
                         error!("{:?} {:02X?}", err, x.packet_payload);
                         None

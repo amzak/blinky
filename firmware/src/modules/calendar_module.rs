@@ -1,11 +1,12 @@
-use std::collections::HashSet;
-use std::sync::Arc;
-
 use crate::modules::reference_time::ReferenceTimeUtc;
-use blinky_shared::calendar::CalendarEventKey;
+use blinky_shared::calendar::{CalendarEventKey, CalendarEventOrderedByStartAsc};
+use blinky_shared::reminders::Reminder;
+use itertools::Itertools;
 use log::{error, info, warn};
 use serde::{Deserialize, Serialize};
-use time::{OffsetDateTime, UtcOffset};
+use std::collections::BTreeSet;
+use std::sync::Arc;
+use time::{Duration, OffsetDateTime, UtcOffset};
 
 use blinky_shared::message_bus::{BusHandler, BusSender, MessageBus};
 use blinky_shared::{
@@ -25,7 +26,7 @@ pub struct CalendarStateDto {
 }
 
 struct Context {
-    update_events: HashSet<CalendarEvent>,
+    update_events: BTreeSet<CalendarEventOrderedByStartAsc>,
     now: Option<OffsetDateTime>,
     utc_offset: Option<UtcOffset>,
 }
@@ -88,11 +89,14 @@ impl BusHandler<Context> for CalendarModule {
 
                 Self::try_restore(
                     bus,
+                    context.now.unwrap(),
                     &mut context.update_events,
                     unit,
                     context.utc_offset.unwrap(),
                 )
                 .await;
+
+                Self::set_reminders(context, bus);
             }
             _ => {}
         }
@@ -104,7 +108,13 @@ impl BusHandler<Context> for CalendarModule {
                 bus.send_event(Events::InSync(false));
             }
             Commands::SetTimezone(offset) => {
-                context.utc_offset = Some(UtcOffset::from_whole_seconds(offset).unwrap());
+                let utc_offset = UtcOffset::from_whole_seconds(offset).unwrap();
+                context.utc_offset = Some(utc_offset);
+
+                if context.now.is_some() {
+                    context.now = Some(context.now.unwrap().replace_offset(utc_offset));
+                }
+
                 bus.send_cmd(Commands::Restore(PersistenceUnitKind::CalendarSyncInfo));
             }
             _ => {}
@@ -113,12 +123,12 @@ impl BusHandler<Context> for CalendarModule {
 }
 
 fn handle_event_update(context: &mut Context, reference_calendar_event: &CalendarEvent) {
-    let replaced = context
-        .update_events
-        .replace(reference_calendar_event.clone());
+    let replaced = context.update_events.insert(CalendarEventOrderedByStartAsc(
+        reference_calendar_event.clone(),
+    ));
 
-    if replaced.is_some() {
-        info!("event updated {}", replaced.unwrap().id);
+    if replaced {
+        info!("event updated {}", reference_calendar_event.id);
     }
 }
 
@@ -127,7 +137,7 @@ impl CalendarModule {
         info!("starting...");
 
         let context = Context {
-            update_events: HashSet::new(),
+            update_events: BTreeSet::new(),
             now: None,
             utc_offset: None,
         };
@@ -139,7 +149,7 @@ impl CalendarModule {
 
     async fn try_restore(
         bus: &BusSender,
-        calendar_events: &mut HashSet<CalendarEvent>,
+        calendar_events: &mut BTreeSet<CalendarEventOrderedByStartAsc>,
         posponed_restore: PersistenceUnit,
         utc_offset: UtcOffset,
     ) -> bool {
@@ -152,19 +162,23 @@ impl CalendarModule {
                     calendar_info_restored.events.len()
                 );
 
-                let calendar_events_restored: Vec<_> = calendar_info_restored
-                    .events
-                    .into_iter()
-                    .map(|x| CalendarEvent::new(x, utc_offset))
-                    .collect();
-
                 let chunk_size = 5;
-                for chunk in calendar_events_restored.chunks(chunk_size) {
-                    for event in chunk {
-                        calendar_events.insert(event.clone());
+
+                let calendar_events_restored = calendar_info_restored
+                    .events
+                    .iter()
+                    .map(|x| CalendarEvent::new(x, utc_offset))
+                    .chunks(chunk_size);
+
+                for chunk in calendar_events_restored.into_iter() {
+                    let mut batch = Vec::with_capacity(chunk_size);
+
+                    for event in chunk.into_iter() {
+                        calendar_events.insert(CalendarEventOrderedByStartAsc(event.clone()));
+                        batch.push(event);
                     }
 
-                    bus.send_event(Events::CalendarEventsBatch(Arc::new(Vec::from(chunk))));
+                    bus.send_event(Events::CalendarEventsBatch(Arc::new(batch)));
                 }
             }
             Err(error) => {
@@ -185,19 +199,21 @@ impl CalendarModule {
 
         let now = now.unwrap();
 
-        context.update_events.retain(|x| x.end >= now);
+        context.update_events.retain(|x| x.0.end >= now);
+
+        Self::set_reminders(context, bus);
 
         let calendar_events = context.update_events.iter();
 
         let event_keys: Vec<CalendarEventKey> = calendar_events
-            .map(|x| CalendarEventKey(x.kind, x.id))
+            .map(|x| CalendarEventKey(x.0.kind, x.0.id))
             .collect();
 
         let calendar_events = context.update_events.iter();
 
         let dtos: Vec<CalendarEventDto> = calendar_events
             .into_iter()
-            .map(|x| CalendarEventDto::from(x))
+            .map(|x| CalendarEventDto::from(&x.0))
             .collect();
 
         let calendar_state_dto = CalendarStateDto::new(dtos, now.into());
@@ -206,5 +222,39 @@ impl CalendarModule {
 
         bus.send_cmd(Commands::Persist(persistence_unit));
         bus.send_event(Events::PersistedCalendarEvents(Arc::new(event_keys)))
+    }
+
+    fn set_reminders(context: &mut Context, bus: &BusSender) {
+        let mut next_alert: Option<&CalendarEventOrderedByStartAsc> = None;
+        let now = context.now.unwrap();
+
+        info!("set_reminders: now {:?}", now);
+
+        let reminders = context
+            .update_events
+            .iter()
+            .filter(|x| x.0.start >= now)
+            .map(|x| {
+                info!("set_reminders: {:?}", x);
+
+                if next_alert.is_none() && x.0.start > now + Duration::seconds(10) {
+                    next_alert = Some(x);
+                }
+
+                Reminder {
+                    event_id: x.0.id,
+                    kind: blinky_shared::reminders::ReminderKind::Event,
+                    remind_at: x.0.start,
+                }
+            })
+            .collect();
+
+        bus.send_cmd(Commands::SetReminders(reminders));
+
+        if next_alert.is_some() {
+            bus.send_cmd(Commands::SetRtcAlert(next_alert.unwrap().0.start));
+        } else {
+            bus.send_cmd(Commands::ResetRtcAlert);
+        }
     }
 }

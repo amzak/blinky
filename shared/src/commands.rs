@@ -1,4 +1,7 @@
-use crate::persistence::{PersistenceUnit, PersistenceUnitKind};
+use crate::{
+    persistence::{PersistenceUnit, PersistenceUnitKind},
+    reminders::Reminder,
+};
 use time::OffsetDateTime;
 
 #[derive(Clone, Debug)]
@@ -17,4 +20,8 @@ pub enum Commands {
     SetTimezone(i32),
     AbortSleep,
     ShutdownBle,
+    SetRtcAlert(OffsetDateTime),
+    ResetRtcAlert,
+    SetReminders(Vec<Reminder>),
+    DebugAccel,
 }
