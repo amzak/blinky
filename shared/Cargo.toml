@@ -2,12 +2,16 @@
 name = "blinky-shared"
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.75"
+rust-version = "1.80"
+
+[lib]
+harness = false
+test = false
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-time = { version = "0.3.20", features = ["macros", "serde", "formatting"] }
+time = { version = "0.3.36", features = ["macros", "serde", "formatting"] }
 serde = { version = "1.0.159", default-features = false, features = ["derive"] }
 serde_repr = "0.1.18"
 serde_bytes = "0.11"
