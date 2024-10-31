@@ -7,6 +7,7 @@ use std::sync::Arc;
 use blinky_shared::calendar::{CalendarEvent, CalendarEventKey, CalendarKind};
 use blinky_shared::display_interface::ClockDisplayInterface;
 use blinky_shared::events::Events;
+use blinky_shared::fasttrack::FastTrackRtcData;
 use blinky_shared::message_bus::MessageBus;
 use blinky_shared::{commands::Commands, modules::renderer::Renderer};
 use display::SimDisplay;
@@ -43,7 +44,12 @@ async fn main_async() -> Result<(), Box<dyn std::error::Error>> {
 
     let display = SimDisplay::create();
 
-    let renderer_task = Renderer::<SimDisplay>::start(message_bus_clone, display, None);
+    let rtc_data = FastTrackRtcData {
+        alarm_status: false,
+        now: None,
+    };
+
+    let renderer_task = Renderer::<SimDisplay>::start(message_bus_clone, display, rtc_data);
 
     let message_bus_clone = message_bus.clone();
     tokio::task::spawn_blocking(move || {

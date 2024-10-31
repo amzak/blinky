@@ -6,6 +6,7 @@
 
 use blinky_shared::commands::Commands;
 use blinky_shared::events::Events;
+use blinky_shared::fasttrack::FastTrackRtcData;
 use blinky_shared::message_bus::MessageBus;
 use blinky_shared::modules::renderer::Renderer;
 use blinky_shared::persistence::PersistenceUnitKind;
@@ -101,8 +102,11 @@ async fn main_async() -> Result<(), Box<dyn std::error::Error>> {
 
     let rtc_task = start_rtc(&message_bus, fasttrack_result.rtc);
 
-    let renderer_task =
-        start_renderer(&message_bus, fasttrack_result.display, fasttrack_result.now);
+    let renderer_task = start_renderer(
+        &message_bus,
+        fasttrack_result.display,
+        fasttrack_result.rtc_data,
+    );
 
     let tasks_batch: Vec<Pin<Box<dyn futures::Future<Output = ()>>>> = vec![
         Box::pin(logging_task),
@@ -192,8 +196,8 @@ fn start_rtc(mb: &MessageBus, rtc: Rtc<'static>) -> impl Future<Output = ()> {
 fn start_renderer(
     mb: &MessageBus,
     display: ClockDisplay<'static>,
-    now: Option<OffsetDateTime>,
+    rtc_data: FastTrackRtcData,
 ) -> impl Future<Output = ()> {
     let mb = mb.clone();
-    Renderer::<ClockDisplay>::start(mb, display, now)
+    Renderer::<ClockDisplay>::start(mb, display, rtc_data)
 }

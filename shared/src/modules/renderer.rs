@@ -22,6 +22,7 @@ use crate::calendar::{CalendarEvent, CalendarEventKey};
 use crate::commands::Commands;
 use crate::display_interface::{ClockDisplayInterface, LayerType, RenderMode};
 use crate::events::Events;
+use crate::fasttrack::FastTrackRtcData;
 use crate::message_bus::{BusHandler, BusSender, MessageBus};
 use embedded_graphics::primitives::{PrimitiveStyle, StyledDrawable};
 use embedded_graphics::{mono_font::MonoTextStyle, prelude::*, primitives};
@@ -154,7 +155,7 @@ impl<TDisplay> Renderer<TDisplay>
 where
     TDisplay: ClockDisplayInterface + 'static + Send,
 {
-    pub async fn start(bus: MessageBus, display: TDisplay, now: Option<OffsetDateTime>) {
+    pub async fn start(bus: MessageBus, display: TDisplay, rtc_data: FastTrackRtcData) {
         info!("starting...");
 
         let (tx, rx) = channel::<Events>(16);
@@ -163,7 +164,7 @@ where
 
         let message_bus = bus.clone();
         let render_loop_task = tokio::task::spawn_blocking(move || {
-            Self::render_loop(message_bus, rx, display, now);
+            Self::render_loop(message_bus, rx, display, rtc_data);
         });
 
         MessageBus::handle::<Context, Self>(bus, context).await;
@@ -540,7 +541,7 @@ where
         bus: MessageBus,
         mut rx: Receiver<Events>,
         display_param: TDisplay,
-        now: Option<OffsetDateTime>,
+        rtc_data: FastTrackRtcData,
     ) {
         info!("renderer loop started");
 

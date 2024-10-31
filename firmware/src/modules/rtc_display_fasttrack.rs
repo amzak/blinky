@@ -1,13 +1,14 @@
 use blinky_shared::{
     display_interface::{ClockDisplayInterface, LayerType, RenderMode},
+    fasttrack::FastTrackRtcData,
     modules::renderer::{Renderer, TimeViewModel},
 };
 use esp_idf_hal::i2c::I2cDriver;
-use time::{OffsetDateTime, UtcOffset};
+use peripherals::i2c_proxy_async::I2cProxyAsync;
+use time::UtcOffset;
 
 use crate::peripherals::{
-    display::ClockDisplay, hal::HalConfig, i2c_proxy_async::I2cProxyAsync, output::PinOutput,
-    rtc::Rtc, rtc_memory::UTC_OFFSET,
+    display::ClockDisplay, hal::HalConfig, output::PinOutput, rtc::Rtc, rtc_memory::UTC_OFFSET,
 };
 
 pub struct RtcDisplayFastTrack {}
@@ -15,7 +16,7 @@ pub struct RtcDisplayFastTrack {}
 pub struct FastTrackResult<'a> {
     pub rtc: Rtc<'a>,
     pub display: ClockDisplay<'a>,
-    pub now: Option<OffsetDateTime>,
+    pub rtc_data: FastTrackRtcData,
 }
 
 impl RtcDisplayFastTrack {
@@ -36,11 +37,16 @@ impl RtcDisplayFastTrack {
         let mut rtc = Rtc::create(i2c_proxy);
         let mut display = ClockDisplay::create();
 
+        let alarm_status = rtc.get_alarm_status();
+
         if Self::missing_timezone_info() {
             return FastTrackResult {
                 rtc,
                 display,
-                now: None,
+                rtc_data: FastTrackRtcData {
+                    now: None,
+                    alarm_status,
+                },
             };
         }
 
@@ -63,7 +69,10 @@ impl RtcDisplayFastTrack {
         return FastTrackResult {
             rtc,
             display,
-            now: Some(now_local),
+            rtc_data: FastTrackRtcData {
+                now: Some(now_local),
+                alarm_status,
+            },
         };
     }
 }
