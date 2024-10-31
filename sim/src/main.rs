@@ -13,7 +13,7 @@ use blinky_shared::{commands::Commands, modules::renderer::Renderer};
 use display::SimDisplay;
 use env_logger::{Builder, Target};
 use log::{info, LevelFilter};
-use time::{OffsetDateTime, Time};
+use time::{OffsetDateTime, Time, UtcOffset};
 use tokio::join;
 use tokio::time::{sleep, Duration};
 
@@ -64,7 +64,11 @@ async fn main_async() -> Result<(), Box<dyn std::error::Error>> {
         let now_utc = OffsetDateTime::now_utc();
         let date = now_utc.date();
 
-        let mut now = OffsetDateTime::new_utc(date, Time::from_hms(12, 0, 0).unwrap()); //Time::MIDNIGHT);
+        let mut now = OffsetDateTime::new_in_offset(
+            date,
+            Time::from_hms(12, 0, 0).unwrap(),
+            UtcOffset::from_hms(2, 0, 0).unwrap(),
+        );
 
         let event_start_time = OffsetDateTime::new_utc(date, Time::MIDNIGHT)
             + Duration::from_hours(12)
