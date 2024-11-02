@@ -202,7 +202,7 @@ impl PowerModule {
         unsafe {
             esp_idf_sys::gpio_wakeup_enable(32, gpio_int_type_t_GPIO_INTR_LOW_LEVEL);
             esp_idf_sys::esp_sleep_enable_gpio_wakeup();
-            esp_idf_sys::esp_sleep_enable_timer_wakeup(Self::TILL_DEEP_SLEEP_SEC as u64 * 1000000);
+            esp_idf_sys::esp_sleep_enable_timer_wakeup(Self::TILL_DEEP_SLEEP_SEC as u64 * 1000_000);
             esp_idf_sys::esp_light_sleep_start();
         }
 
@@ -236,7 +236,6 @@ impl PowerModule {
 
     fn announce_battery_level(bus: &MessageBus, adc: &mut AdcDevice) {
         let adc_value = adc.read();
-        info!("adc {:?}", adc_value);
 
         let is_charging = Self::is_charging();
 

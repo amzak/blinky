@@ -89,7 +89,6 @@ impl BusHandler<Context> for CalendarModule {
 
                 Self::try_restore(
                     bus,
-                    context.now.unwrap(),
                     &mut context.update_events,
                     unit,
                     context.utc_offset.unwrap(),
