@@ -17,7 +17,8 @@ impl<'a> BusHandler<Context<'a>> for AccelerometerModule {
     async fn event_handler(bus: &BusSender, context: &mut Context<'a>, event: Events) {
         match event {
             Events::SharedInterrupt => {
-                Self::read_interrupt_status(&mut context.accel).await;
+                let int_status = context.accel.read_interrupt_status();
+                info!("int_status: {:?}", int_status);
             }
             _ => {}
         }
@@ -63,10 +64,5 @@ impl AccelerometerModule {
         }
 
         info!("done.")
-    }
-
-    async fn read_interrupt_status<'a>(accel: &mut Accelerometer<'a>) {
-        let interrupt_status = accel.read_interrupt_status();
-        info!("accel interrupt status = {:?}", interrupt_status);
     }
 }
