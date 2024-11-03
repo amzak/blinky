@@ -193,7 +193,12 @@ impl BleModule {
             .name(Self::DEVICE_NAME)
             .add_service_uuid(Self::SERVICE_GUID);
 
-        advertising.lock().set_data(&mut ad_data).unwrap();
+        let advertising_set_res = advertising.lock().set_data(&mut ad_data);
+
+        if let Err(error) = advertising_set_res {
+            error!("can't set ble advertising data, error {:?}", error);
+            return None;
+        }
 
         if let Err(error) = advertising.lock().start() {
             error!("can't start ble advertising, error {:?}", error);
@@ -250,16 +255,18 @@ impl BleModule {
         for packet in packets {
             let buf = packet.as_slice();
 
-            info!("replying packet: {:02X?}", &buf);
+            let characteristic_opt = context.rw_characteristic.as_ref();
 
-            context
-                .rw_characteristic
-                .as_ref()
-                .unwrap()
-                .lock()
-                .set_value(buf);
+            if let Some(characteristic) = characteristic_opt {
+                info!("replying packet: {:02X?}", &buf);
 
-            context.rw_characteristic.as_ref().unwrap().lock().notify();
+                let mut guard = characteristic.lock();
+
+                guard.set_value(buf);
+                guard.notify();
+            } else {
+                info!("failed to get characteristic to write to");
+            }
         }
 
         info!("replying persisted complete.");
