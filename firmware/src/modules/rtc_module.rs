@@ -80,24 +80,7 @@ impl RtcModule {
                             bus.send_event(Events::TimeNow(now));
                         }
 
-                        loop {
-                            let first_opt = reminders.first();
-
-                            if first_opt.is_none() {
-                                break;
-                            }
-
-                            let remind_at = first_opt.unwrap().remind_at;
-                            if now < remind_at {
-                                break;
-                            }
-
-                            let first = reminders.pop_first();
-
-                            if now >= remind_at {
-                                bus.send_event(Events::Reminder(first.unwrap()));
-                            }
-                        }
+                        invoke_reminders(&mut reminders, now, &bus);
                     }
                     Commands::SetReminders(mut reminders_param) => {
                         for reminder in reminders_param.drain(..) {
@@ -173,5 +156,30 @@ impl RtcModule {
             }
         };
         utc_offset
+    }
+}
+
+fn invoke_reminders(
+    reminders: &mut BTreeSet<Reminder>,
+    now: time::OffsetDateTime,
+    bus: &MessageBus,
+) {
+    loop {
+        let first_opt = reminders.first();
+
+        if first_opt.is_none() {
+            break;
+        }
+
+        let remind_at = first_opt.unwrap().remind_at;
+        if now < remind_at {
+            break;
+        }
+
+        let first = reminders.pop_first();
+
+        if now >= remind_at {
+            bus.send_event(Events::Reminder(first.unwrap()));
+        }
     }
 }

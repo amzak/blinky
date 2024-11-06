@@ -224,36 +224,39 @@ impl CalendarModule {
     }
 
     fn set_reminders(context: &mut Context, bus: &BusSender) {
-        let mut next_alert: Option<&CalendarEventOrderedByStartAsc> = None;
         let now = context.now.unwrap();
 
-        info!("set_reminders: now {:?}", now);
-
-        let reminders = context
+        let reminders: Vec<_> = context
             .update_events
             .iter()
-            .filter(|x| x.0.start >= now)
-            .map(|x| {
-                info!("set_reminders: {:?}", x);
-
-                if next_alert.is_none() && x.0.start > now + Duration::seconds(10) {
-                    next_alert = Some(x);
-                }
-
-                Reminder {
-                    event_id: x.0.id,
-                    kind: blinky_shared::reminders::ReminderKind::Event,
-                    remind_at: x.0.start,
-                }
+            .filter(|x| x.0.start >= now && x.0.end - x.0.start < Duration::days(1))
+            .flat_map(|x| {
+                return vec![
+                    Reminder {
+                        event_id: x.0.id,
+                        kind: blinky_shared::reminders::ReminderKind::Notification,
+                        remind_at: x.0.start - Duration::minutes(10),
+                    },
+                    Reminder {
+                        event_id: x.0.id,
+                        kind: blinky_shared::reminders::ReminderKind::Event,
+                        remind_at: x.0.start,
+                    },
+                ];
             })
+            .sorted_by(|x, y| Ord::cmp(&x.remind_at, &y.remind_at))
             .collect();
 
-        bus.send_cmd(Commands::SetReminders(reminders));
+        let next_alert_candidate = reminders
+            .iter()
+            .find_position(|x| x.remind_at > now + Duration::seconds(10));
 
-        if next_alert.is_some() {
-            bus.send_cmd(Commands::SetRtcAlert(next_alert.unwrap().0.start));
+        if let Some(next_alert) = next_alert_candidate {
+            bus.send_cmd(Commands::SetRtcAlert(next_alert.1.remind_at));
         } else {
             bus.send_cmd(Commands::ResetRtcAlert);
         }
+
+        bus.send_cmd(Commands::SetReminders(reminders));
     }
 }

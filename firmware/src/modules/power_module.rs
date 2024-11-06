@@ -2,6 +2,7 @@ use crate::peripherals::adc::AdcDevice;
 use crate::peripherals::hal::PinConfig;
 use crate::peripherals::output::PinOutput;
 use blinky_shared::domain::WakeupCause;
+use blinky_shared::reminders::ReminderKind;
 use esp_idf_hal::adc::ADC1;
 use esp_idf_hal::gpio::{AnyIOPin, Gpio36, Level, PinDriver, Pull};
 use esp_idf_sys::{
@@ -39,7 +40,12 @@ impl BusHandler<Context> for PowerModule {
             }
             Events::Reminder(reminder) => {
                 context.idle_reset.notify_one();
-                Self::signal_reminder(&context.config, 3).await;
+
+                if matches!(reminder.kind, ReminderKind::Notification) {
+                    Self::signal_reminder(&context.config, 2).await;
+                } else {
+                    Self::signal_reminder(&context.config, 3).await;
+                }
             }
             _ => {}
         }

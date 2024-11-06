@@ -4,6 +4,7 @@ use time::OffsetDateTime;
 pub enum ReminderKind {
     Event,
     Alert,
+    Notification,
 }
 
 #[derive(Debug, Clone, PartialEq)]
