@@ -1,5 +1,6 @@
 mod calendar_persistence_tests;
 mod contract_serialization_tests;
+mod termperature_decoder_tests;
 
 extern crate blinky_shared;
 

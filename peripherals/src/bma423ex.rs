@@ -683,16 +683,21 @@ impl<I2C: I2c> Bma423Ex<I2C> {
         return Ok(data[0].into());
     }
 
-    const BMA4_SCALE_TEMP: i32 = 1000;
-    const BMA4_OFFSET_TEMP: i32 = 23;
+    const BMA4_SCALE_TEMP: i16 = 1000;
+    const BMA4_OFFSET_TEMP: i16 = 23;
 
     pub fn read_temperature(&mut self) -> Result<f32, I2C::Error> {
         let mut data: [u8; 1] = [0];
         self.write_read(Reg::Temperature, &mut data)?;
 
-        let tempr_raw = (data[0] as i32 + Self::BMA4_OFFSET_TEMP) * Self::BMA4_SCALE_TEMP;
+        let res = data[0].try_into();
+        if let Ok(tmpr) = res {
+            let tmpr_i8: i8 = tmpr;
+            let tempr_raw = (tmpr_i8 as i16 + Self::BMA4_OFFSET_TEMP) * Self::BMA4_SCALE_TEMP;
+            return Ok(tempr_raw as f32 / Self::BMA4_SCALE_TEMP as f32);
+        }
 
-        return Ok(tempr_raw as f32 / Self::BMA4_SCALE_TEMP as f32);
+        return Ok(f32::MAX);
     }
 
     pub fn reset_and_init(&mut self, delay: &mut impl DelayNs) -> Result<(), I2C::Error> {
