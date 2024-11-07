@@ -1,10 +1,11 @@
-use std::{path::Iter, thread, time::Duration};
+use std::{thread, time::Duration};
 
 use bma423::{AccelConfigOdr, AccelRange, Bma423, Config, FullPower};
 use esp_idf_hal::{
     delay::Ets,
     gpio::{Gpio25, Gpio26, IOPin},
-    i2c::{I2cConfig, I2cDriver, I2cError, I2C0},
+    i2c::{I2c, I2cConfig, I2cDriver, I2cError},
+    peripheral::Peripheral,
     units::FromValueType,
 };
 use log::info;
@@ -20,7 +21,7 @@ struct Bma423Tests<'a> {
     pub proxy_ex: I2cProxyAsync<I2cDriver<'a>>,
 }
 
-pub fn run(i2c: I2C0) {
+pub fn run<I2C: I2c>(i2c: impl Peripheral<P = I2C> + 'static) {
     let tests = setup_once(i2c);
 
     should_init_succefully(tests.clone());
@@ -40,7 +41,7 @@ pub fn run(i2c: I2C0) {
     should_get_temperature(tests);
 }
 
-fn setup_once(i2c: I2C0) -> Bma423Tests<'static> {
+fn setup_once<I2C: I2c>(i2c: impl Peripheral<P = I2C> + 'static) -> Bma423Tests<'static> {
     let scl = unsafe { Gpio25::new() };
     let sda = unsafe { Gpio26::new() };
     let config = I2cConfig::new().baudrate(100.kHz().into());

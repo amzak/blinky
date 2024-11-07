@@ -2,7 +2,7 @@
 #![feature(iter_array_chunks)]
 
 use std::{
-    ffi::{self, CString},
+    ffi::{self},
     ptr::addr_of,
 };
 
