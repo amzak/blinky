@@ -20,8 +20,7 @@ pub enum Commands {
     SetTimezone(i32),
     AbortSleep,
     ShutdownBle,
-    SetRtcAlert(OffsetDateTime),
-    ResetRtcAlert,
     SetReminders(Vec<Reminder>),
     DebugAccel,
+    HandleAlarm,
 }

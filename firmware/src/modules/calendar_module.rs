@@ -247,16 +247,6 @@ impl CalendarModule {
             .sorted_by(|x, y| Ord::cmp(&x.remind_at, &y.remind_at))
             .collect();
 
-        let next_alert_candidate = reminders
-            .iter()
-            .find_position(|x| x.remind_at > now + Duration::seconds(10));
-
-        if let Some(next_alert) = next_alert_candidate {
-            bus.send_cmd(Commands::SetRtcAlert(next_alert.1.remind_at));
-        } else {
-            bus.send_cmd(Commands::ResetRtcAlert);
-        }
-
         bus.send_cmd(Commands::SetReminders(reminders));
     }
 }

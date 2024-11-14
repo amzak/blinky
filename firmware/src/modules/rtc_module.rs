@@ -21,7 +21,14 @@ struct Context {
 }
 
 impl BusHandler<Context> for RtcModule {
-    async fn event_handler(_bus: &BusSender, _context: &mut Context, _event: Events) {}
+    async fn event_handler(bus: &BusSender, context: &mut Context, event: Events) {
+        match event {
+            Events::SharedInterrupt => {
+                context.tx_rtc.send(Commands::HandleAlarm).await.unwrap();
+            }
+            _ => {}
+        }
+    }
 
     async fn command_handler(_bus: &BusSender, context: &mut Context, command: Commands) {
         match command {
@@ -107,12 +114,6 @@ impl RtcModule {
                             UTC_OFFSET = Some(timezone);
                         }
                     }
-                    Commands::SetRtcAlert(alert_at) => {
-                        rtc.set_alarm(alert_at);
-
-                        info!("set rtc alert for {}", alert_at);
-                    }
-                    Commands::ResetRtcAlert => rtc.reset_alarm(),
                     Commands::PauseRendering => {
                         is_paused = true;
                     }
@@ -120,8 +121,14 @@ impl RtcModule {
                         is_paused = false;
                     }
                     Commands::StartDeepSleep => {
+                        set_next_alarm(&mut rtc, &reminders);
                         is_paused = false;
                         break;
+                    }
+                    Commands::HandleAlarm => {
+                        if rtc.get_alarm_status() {
+                            set_next_alarm(&mut rtc, &reminders);
+                        }
                     }
                     _ => {}
                 },
@@ -156,6 +163,21 @@ impl RtcModule {
             }
         };
         utc_offset
+    }
+}
+
+fn set_next_alarm(rtc: &mut Rtc, reminders: &BTreeSet<Reminder>) {
+    if reminders.is_empty() {
+        return;
+    }
+
+    let first = reminders.first();
+
+    if let Some(next_reminder) = first {
+        let remind_at = next_reminder.remind_at;
+
+        rtc.set_alarm(remind_at);
+        info!("set next rtc alarm for {}", remind_at);
     }
 }
 
