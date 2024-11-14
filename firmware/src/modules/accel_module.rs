@@ -19,6 +19,7 @@ impl<'a> BusHandler<Context<'a>> for AccelerometerModule {
             Events::SharedInterrupt => {
                 let int_status = context.accel.read_interrupt_status();
                 info!("int_status: {:?}", int_status);
+                bus.send_event(Events::AccelerometerInterrupt(int_status.feature.into()));
             }
             _ => {}
         }

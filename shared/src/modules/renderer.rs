@@ -67,6 +67,7 @@ struct ViewModel {
     mode: VisualMode,
 
     alarm_counter: i16,
+    gesture: u8,
 }
 
 pub struct TimeViewModel {
@@ -145,6 +146,8 @@ impl<TDisplay> Renderer<TDisplay> {
             | Events::CalendarEventsBatch(_)
             | Events::DropCalendarEventsBatch(_)
             | Events::Reminder(_)
+            | Events::AccelerometerInterrupt(_)
+            | Events::RtcAlarmInterrupt(_)
             | Events::Key1Press => {
                 return true;
             }
@@ -572,6 +575,7 @@ where
             time_vm: TimeViewModel { time: rtc_data.now },
             is_past_first_frame: false,
             alarm_counter: if rtc_data.alarm_status { 10 } else { 0 },
+            gesture: 0,
         };
 
         let mut static_rendered = false;
@@ -686,6 +690,9 @@ where
             Events::Reminder(_reminder) => {
                 view_model.alarm_counter = 10;
             }
+            Events::AccelerometerInterrupt(gesture) => {
+                view_model.gesture = gesture;
+            }
             _ => {
                 state_changed = false;
             }
@@ -744,6 +751,7 @@ where
                         }
                     }
                     VisualMode::Details => {
+                        Self::render_debug_info(&mut frame, vm);
                         Self::render_current_events_details(&mut frame, vm);
                     }
                 }
@@ -1098,6 +1106,20 @@ where
         frame.fill_contiguous(
             &embedded_graphics::primitives::Rectangle::with_center(center, size),
             iter,
+        );
+    }
+
+    fn render_debug_info(frame: &mut TDisplay::FrameBuffer<'_>, vm: &mut ViewModel) {
+        let text = format!("gesture = {}", vm.gesture);
+
+        let style_time = U8g2TextStyle::new(fonts::u8g2_font_siji_t_6x10, RgbColor::WHITE);
+
+        Graphics::<TDisplay>::text_aligned(
+            frame,
+            &text,
+            Point::new(120, 140),
+            style_time,
+            embedded_graphics::text::Alignment::Center,
         );
     }
 }

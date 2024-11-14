@@ -35,4 +35,6 @@ pub enum Events {
     FirstRender,
     Reminder(Reminder),
     Term,
+    AccelerometerInterrupt(u8),
+    RtcAlarmInterrupt(bool),
 }
