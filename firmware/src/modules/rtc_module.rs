@@ -1,7 +1,7 @@
 use std::collections::BTreeSet;
 
 use blinky_shared::reminders::Reminder;
-use log::info;
+use log::{error, info};
 use time::{PrimitiveDateTime, UtcOffset};
 use tokio::select;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
@@ -50,7 +50,7 @@ impl RtcModule {
             Self::rtc_loop(bus_clone, rx_rtc, rtc);
         });
 
-        let timer = tokio::spawn(Self::run_timer(tx_rtc.clone()));
+        let timer = tokio::spawn(Self::ticker_loop(tx_rtc.clone()));
 
         let context = Context { tx_rtc };
 
@@ -139,16 +139,20 @@ impl RtcModule {
         info!("rtc loop done.")
     }
 
-    async fn run_timer(tx: Sender<Commands>) {
+    async fn ticker_loop(tx: Sender<Commands>) {
         let mut interval = tokio::time::interval(core::time::Duration::from_secs(1));
         interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
-        info!("timer loop started");
+        info!("ticker loop started");
 
         loop {
             select! {
                 _ = interval.tick() => {
-                    tx.send(Commands::GetTimeNow).await.unwrap();
+                    let send_res = tx.send(Commands::GetTimeNow).await.err();
+
+                    if let Some(send_error) = send_res {
+                        error!("{}", send_error);
+                    }
                 }
             }
         }
