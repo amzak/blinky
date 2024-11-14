@@ -348,7 +348,7 @@ where
         let time_pos = now - today_midnight;
 
         let angle = ((time_pos.whole_minutes() as f32 / (12.0 * 60.0)) * 360.0) % 360.0;
-        let length: f32 = 5.0;
+        let length: f32 = 15.0;
 
         let radius = (TDisplay::FRAME_BUFFER_SIDE / 2) as f32;
 
