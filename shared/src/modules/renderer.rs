@@ -946,8 +946,6 @@ where
         now: &OffsetDateTime,
     ) {
         for event in events {
-            let till_start = event.start - *now;
-
             Self::render_todays_event(frame, &event, &now);
         }
     }
@@ -965,7 +963,13 @@ where
             TDisplay::ColorModel::from(RawU16::from_u32(event.color))
         };
 
-        Self::render_time_range_arc(frame, &now, &event.start, &event.end, 238, 4, color);
+        let visual_end = if event.end > now + HALF_DAY {
+            now + HALF_DAY
+        } else {
+            event.end
+        };
+
+        Self::render_time_range_arc(frame, &now, &event.start, &visual_end, 238, 4, color);
 
         let event_start_rel = event.start - now;
 
