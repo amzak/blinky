@@ -57,7 +57,7 @@ struct ViewModel {
     is_charging: Option<bool>,
     battery_level: Option<u16>,
     ble_connected: Option<bool>,
-    temperature: Option<f32>,
+    temperature: Option<i32>,
     calendar_events: BTreeSet<CalendarEvent>,
 
     force_render_events: bool,

@@ -20,7 +20,7 @@ pub enum Events {
     Key2Press,
     TouchPos(TouchPosition),
     IncomingData(Arc<Vec<u8>>),
-    Temperature(f32),
+    Temperature(i32),
     BatteryLevel(u16),
     Charging(bool),
     InSync(bool),

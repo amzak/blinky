@@ -11,7 +11,7 @@ use tokio::time::{sleep, Duration};
 
 pub struct Accelerometer<'a> {
     accel_base: Bma423<I2cProxyAsync<I2cDriver<'a>>, FullPower>,
-    pub temperature: f32,
+    pub temperature: i32,
 }
 
 pub struct Thermometer<'a> {
@@ -114,7 +114,7 @@ impl<'a> Accelerometer<'a> {
 }
 
 impl<'a> Thermometer<'a> {
-    pub fn read_temperature(&mut self) -> f32 {
+    pub fn read_temperature(&mut self) -> i32 {
         let t = self.accel_ex.read_temperature().unwrap();
         return t;
     }
