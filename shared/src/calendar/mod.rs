@@ -50,6 +50,14 @@ pub struct CalendarEvent {
     pub description: String,
 }
 
+#[derive(Clone, Debug)]
+pub struct CalendarEventSegment {
+    pub event_id: i32,
+    pub lane: u8,
+    pub start: Option<OffsetDateTime>,
+    pub end: Option<OffsetDateTime>,
+}
+
 #[derive(Debug)]
 pub struct CalendarEventOrderedByStartAsc(pub CalendarEvent);
 
