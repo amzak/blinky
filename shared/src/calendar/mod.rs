@@ -48,6 +48,7 @@ pub struct CalendarEvent {
     pub icon: CalendarEventIcon,
     pub color: u32,
     pub description: String,
+    pub lane: u8,
 }
 
 #[derive(Clone, Debug)]
@@ -71,6 +72,7 @@ pub struct CalendarEventDto {
     pub icon: CalendarEventIcon,
     pub color: u32,
     pub description: String,
+    pub lane: u8,
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone, Hash)]
@@ -87,6 +89,7 @@ impl From<CalendarEvent> for CalendarEventDto {
             icon: value.icon,
             color: value.color,
             description: value.description,
+            lane: value.lane,
         }
     }
 }
@@ -102,6 +105,7 @@ impl From<&CalendarEvent> for CalendarEventDto {
             icon: value.icon,
             color: value.color,
             description: value.description.clone(),
+            lane: value.lane,
         }
     }
 }
@@ -148,6 +152,7 @@ impl CalendarEvent {
             icon: dto.icon,
             color: dto.color,
             description: dto.description.clone(),
+            lane: dto.lane,
         }
     }
 
@@ -171,6 +176,7 @@ impl From<CalendarEventDto> for CalendarEvent {
             icon: dto.icon,
             color: dto.color,
             description: dto.description,
+            lane: dto.lane,
         }
     }
 }
