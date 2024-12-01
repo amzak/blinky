@@ -282,7 +282,7 @@ where
                 * std::f32::consts::PI
                 * 2.0;
 
-            Self::draw_radial_line::<TDisplay::ColorModel>(
+            Self::render_radial_line::<TDisplay::ColorModel>(
                 frame,
                 Angle::from_radians(angle),
                 radius,
@@ -354,7 +354,7 @@ where
 
         let style = PrimitiveStyle::with_stroke(TDisplay::ColorModel::RED, 3);
 
-        Self::draw_radial_line::<TDisplay::ColorModel>(
+        Self::render_radial_line::<TDisplay::ColorModel>(
             frame,
             Angle::from_degrees(angle),
             radius,
@@ -363,7 +363,7 @@ where
         );
     }
 
-    fn draw_radial_line<C>(
+    fn render_radial_line<C>(
         frame: &mut TDisplay::FrameBuffer<'_>,
         angle: Angle,
         initial_radius: f32,
@@ -901,7 +901,7 @@ where
 
         let style = EventTagStyle::large(event.icon, color);
 
-        Self::draw_event_tag(frame, p1, style)
+        Self::render_event_icon(frame, p1, style)
     }
 
     fn render_current_finite_events<'a>(
@@ -937,7 +937,7 @@ where
 
         let style = EventTagStyle::large(event.icon, color);
 
-        Self::draw_event(frame, start_angle, style);
+        Self::render_event_tag(frame, start_angle, style);
     }
 
     fn render_todays_events<'a>(
@@ -979,7 +979,7 @@ where
 
         let style = EventTagStyle::default(event.icon, color);
 
-        Self::draw_event(frame, start_angle, style);
+        Self::render_event_tag(frame, start_angle, style);
     }
 
     fn render_time_range_arc(
@@ -1034,7 +1034,7 @@ where
         }
     }
 
-    fn draw_event(
+    fn render_event_tag(
         frame: &mut TDisplay::FrameBuffer<'_>,
         angle: Angle,
         event_style: EventTagStyle<TDisplay::ColorModel>,
@@ -1045,7 +1045,7 @@ where
 
         let style = PrimitiveStyle::with_stroke(TDisplay::ColorModel::WHITE, thickness);
 
-        let end_point = Self::draw_radial_line::<TDisplay::ColorModel>(
+        let end_point = Self::render_radial_line::<TDisplay::ColorModel>(
             frame,
             angle,
             initial_radius,
@@ -1053,10 +1053,10 @@ where
             style,
         );
 
-        Self::draw_event_tag(frame, end_point, event_style);
+        Self::render_event_icon(frame, end_point, event_style);
     }
 
-    fn draw_event_tag(
+    fn render_event_icon(
         frame: &mut TDisplay::FrameBuffer<'_>,
         point: Point,
         style: EventTagStyle<TDisplay::ColorModel>,
