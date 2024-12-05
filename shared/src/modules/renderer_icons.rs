@@ -1,6 +1,5 @@
-use embedded_graphics::geometry::Point;
-
 use crate::{calendar::CalendarEventIcon, display_interface::ClockDisplayInterface};
+use embedded_graphics::geometry::Point;
 use embedded_icon::{
     mdi::{
         size12px as small_mdi_icons, size18px as big_mdi_icons,

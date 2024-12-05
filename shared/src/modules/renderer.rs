@@ -86,7 +86,7 @@ impl<TColor> EventTagStyle<TColor> {
     fn default(icon: CalendarEventIcon, color: TColor) -> Self {
         Self {
             color,
-            event_tag_size: 18,
+            event_tag_size: 16,
             icon,
             length: 25,
             thickness: 1,
@@ -304,7 +304,7 @@ where
 
         let time_as_text = vm.time.unwrap().format(&time_template).unwrap();
 
-        let position = Point::new(120, 120);
+        let position = Self::get_zero_point();
 
         Graphics::<TDisplay>::text_aligned(
             frame,
@@ -312,6 +312,13 @@ where
             position,
             time_text_style,
             embedded_graphics::text::Alignment::Center,
+        )
+    }
+
+    fn get_zero_point() -> Point {
+        Point::new(
+            TDisplay::FRAME_BUFFER_SIDE as i32 / 2,
+            TDisplay::FRAME_BUFFER_SIDE as i32 / 2,
         )
     }
 
@@ -342,24 +349,26 @@ where
     fn render_radial_line<C>(
         frame: &mut TDisplay::FrameBuffer<'_>,
         angle: Angle,
-        initial_radius: f32,
+        outer_radius: f32,
         length: f32,
         style: PrimitiveStyle<TDisplay::ColorModel>,
     ) -> Point {
-        let radius_inner = initial_radius - length;
+        let radius_inner = outer_radius - length;
 
         let (sin, cos) = (Angle::from_radians(std::f32::consts::PI) - angle)
             .to_radians()
             .sin_cos();
 
+        let zero_point = Self::get_zero_point();
+
         let p1 = Point::new(
-            (initial_radius * (sin + 1.0)) as i32,
-            (initial_radius * (cos + 1.0)) as i32,
+            (outer_radius * sin) as i32 + zero_point.x,
+            (outer_radius * cos) as i32 + zero_point.y,
         );
 
         let p2 = Point::new(
-            (radius_inner * sin + initial_radius) as i32,
-            (radius_inner * cos + initial_radius) as i32,
+            (radius_inner * sin) as i32 + zero_point.x,
+            (radius_inner * cos) as i32 + zero_point.y,
         );
 
         primitives::Line::new(p1, p2)
@@ -474,8 +483,6 @@ where
             char::from_u32(0xe120 + 13).unwrap(),
             char::from_u32(0xe220 + 7).unwrap()
         );
-
-        let half_width = TDisplay::FRAME_BUFFER_SIDE as i32 / 2;
 
         let top_left = Point::new(120, 140);
 
@@ -705,7 +712,7 @@ where
                     }
                 });
 
-                frame.draw_iter(watchface);
+                frame.draw_iter(watchface).unwrap();
 
                 frame
             });
@@ -759,14 +766,14 @@ where
 
         let style = MonoTextStyle::new(&FONT_6X10, TDisplay::ColorModel::WHITE);
 
-        let center = Point::new_equal(TDisplay::FRAME_BUFFER_SIDE as i32 / 2);
+        let zero_point = Self::get_zero_point();
 
         let mut correction: i32 = 0;
 
         for (index, event) in current_events.enumerate() {
             Text::with_alignment(
                 event.title.as_str(),
-                Point::new(0, -20 + ((index as i32 + correction) * 2) * 12) + center,
+                Point::new(0, -20 + ((index as i32 + correction) * 2) * 12) + zero_point,
                 style_underline,
                 embedded_graphics::text::Alignment::Center,
             )
@@ -780,7 +787,7 @@ where
 
             Text::with_alignment(
                 event.description.as_str(),
-                Point::new(0, -20 + ((index as i32 + correction) * 2 + 1) * 12) + center,
+                Point::new(0, -20 + ((index as i32 + correction) * 2 + 1) * 12) + zero_point,
                 style,
                 embedded_graphics::text::Alignment::Center,
             )
@@ -864,10 +871,7 @@ where
             .to_radians()
             .sin_cos();
 
-        let p1 = Point::new(
-            TDisplay::FRAME_BUFFER_SIDE as i32 / 2 + (radius * (sin)) as i32,
-            TDisplay::FRAME_BUFFER_SIDE as i32 / 2 + (radius * (cos)) as i32,
-        );
+        let p1 = Point::new((radius * sin) as i32, (radius * cos) as i32);
 
         let color = if event.color == 0 {
             TDisplay::ColorModel::WHITE
@@ -877,7 +881,9 @@ where
 
         let style = EventTagStyle::large(event.icon, color);
 
-        Self::render_event_icon(frame, p1, style)
+        let zero_point = Self::get_zero_point();
+
+        Self::render_event_icon(frame, p1 + zero_point, &style)
     }
 
     fn render_current_finite_events<'a>(
@@ -886,34 +892,8 @@ where
         now: &OffsetDateTime,
     ) {
         for event in events {
-            Self::render_current_finite_event(frame, &event, &now);
+            Self::render_todays_event(frame, &event, &now);
         }
-    }
-
-    fn render_current_finite_event(
-        frame: &mut TDisplay::FrameBuffer<'_>,
-        event: &CalendarEvent,
-        now_ref: &OffsetDateTime,
-    ) {
-        let now = *now_ref;
-
-        let color = if event.color == 0 {
-            TDisplay::ColorModel::WHITE
-        } else {
-            TDisplay::ColorModel::from(RawU16::from_u32(event.color))
-        };
-
-        Self::render_time_range_arc(frame, &now, &event.start, &event.end, 238, 4, color);
-
-        let event_start_rel = Duration::ZERO;
-
-        let start_angle = Angle::from_radians(
-            (event_start_rel.whole_minutes() as f32 / HALF_DAY.whole_minutes() as f32) * PI * 2.0,
-        );
-
-        let style = EventTagStyle::large(event.icon, color);
-
-        Self::render_event_tag(frame, start_angle, style);
     }
 
     fn render_todays_events<'a>(
@@ -945,17 +925,36 @@ where
             event.end
         };
 
-        Self::render_time_range_arc(frame, &now, &event.start, &visual_end, 238, 4, color);
+        let lane_line_thickness = 4;
+        let lane_spacing = 28;
+        let outer_lane_diameter = 225;
+        let event_arc_diameter = outer_lane_diameter - (event.lane as u32 * lane_spacing);
+
+        Self::render_time_range_arc(
+            frame,
+            &now,
+            &event.start,
+            &visual_end,
+            event_arc_diameter,
+            lane_line_thickness,
+            color,
+        );
 
         let event_start_rel = event.start - now;
 
-        let start_angle = Angle::from_radians(
-            (event_start_rel.whole_minutes() as f32 / HALF_DAY.whole_minutes() as f32) * PI * 2.0,
-        );
+        let start_angle = if event.start <= now {
+            Angle::zero()
+        } else {
+            Angle::from_radians(
+                (event_start_rel.whole_minutes() as f32 / HALF_DAY.whole_minutes() as f32)
+                    * PI
+                    * 2.0,
+            )
+        };
 
-        let style = EventTagStyle::default(event.icon, color);
+        let style = EventTagStyle::default(event.icon, TDisplay::ColorModel::BLACK);
 
-        Self::render_event_tag(frame, start_angle, style);
+        Self::render_event_tag(frame, start_angle, event_arc_diameter as f32, style);
     }
 
     fn render_time_range_arc(
@@ -998,44 +997,46 @@ where
         debug!("arc from {:?} sweep {:?}", start, angle_sweep);
 
         if angle_sweep > Angle::from_degrees(1.0) {
-            primitives::Arc::new(
-                top_left,
-                diameter, //TDisplay::FRAME_BUFFER_SIDE as u32 - top_left.x as u32 * 2,
-                start,
-                angle_sweep,
-            )
-            .into_styled(style)
-            .draw(frame)
-            .unwrap();
+            primitives::Arc::new(top_left, diameter, start, angle_sweep)
+                .into_styled(style)
+                .draw(frame)
+                .unwrap();
         }
     }
 
     fn render_event_tag(
         frame: &mut TDisplay::FrameBuffer<'_>,
         angle: Angle,
+        outer_diameter: f32,
         event_style: EventTagStyle<TDisplay::ColorModel>,
     ) {
-        let initial_radius: f32 = TDisplay::FRAME_BUFFER_SIDE as f32 / 2.0;
-        let length = event_style.length as f32;
-        let thickness = event_style.thickness as u32;
+        let outer_radius: f32 = outer_diameter / 2.0;
 
-        let style = PrimitiveStyle::with_stroke(TDisplay::ColorModel::WHITE, thickness);
+        let event_style_rad = event_style.event_tag_size / 2;
+        let tag_rad_squared = event_style_rad as f32 * event_style_rad as f32;
+        let outer_rad_squared = outer_radius * outer_radius;
+        let arccos_arg = (2.0 * outer_rad_squared - tag_rad_squared) / (2.0 * outer_rad_squared);
 
-        let end_point = Self::render_radial_line::<TDisplay::ColorModel>(
-            frame,
-            angle,
-            initial_radius,
-            length,
-            style,
+        let angle_correction = arccos_arg.acos();
+
+        let (sin, cos) = (Angle::from_radians(std::f32::consts::PI - angle_correction) - angle)
+            .to_radians()
+            .sin_cos();
+
+        let zero_point = Self::get_zero_point();
+
+        let p1 = Point::new(
+            (outer_radius * sin) as i32 + zero_point.x,
+            (outer_radius * cos) as i32 + zero_point.y,
         );
 
-        Self::render_event_icon(frame, end_point, event_style);
+        Self::render_event_icon(frame, p1, &event_style);
     }
 
     fn render_event_icon(
         frame: &mut TDisplay::FrameBuffer<'_>,
         point: Point,
-        style: EventTagStyle<TDisplay::ColorModel>,
+        style: &EventTagStyle<TDisplay::ColorModel>,
     ) {
         let thickness = style.thickness as u32;
         let event_tag_size = style.event_tag_size as u32;
@@ -1043,13 +1044,13 @@ where
         let color = style.color;
 
         let mut solid_style = PrimitiveStyle::with_stroke(TDisplay::ColorModel::WHITE, thickness);
-        solid_style.fill_color = Some(TDisplay::ColorModel::BLACK);
+        solid_style.fill_color = Some(TDisplay::ColorModel::WHITE);
 
         primitives::Circle::with_center(point, event_tag_size)
             .draw_styled(&solid_style, frame)
             .unwrap();
 
-        render_event_icon::<TDisplay>(frame, icon, point, 12, color);
+        render_event_icon::<TDisplay>(frame, icon, point, 6, color);
     }
 
     fn draw_event_tag_template(
