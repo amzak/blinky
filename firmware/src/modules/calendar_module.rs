@@ -4,7 +4,7 @@ use blinky_shared::reminders::Reminder;
 use itertools::Itertools;
 use log::{error, info, warn};
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeSet;
+use std::collections::HashSet;
 use std::sync::Arc;
 use time::{Duration, OffsetDateTime, UtcOffset};
 
@@ -26,7 +26,7 @@ pub struct CalendarStateDto {
 }
 
 struct Context {
-    update_events: BTreeSet<CalendarEventOrderedByStartAsc>,
+    update_events: HashSet<CalendarEvent>,
     now: Option<OffsetDateTime>,
     utc_offset: Option<UtcOffset>,
 }
@@ -122,9 +122,9 @@ impl BusHandler<Context> for CalendarModule {
 }
 
 fn handle_event_update(context: &mut Context, reference_calendar_event: &CalendarEvent) {
-    let replaced = context.update_events.insert(CalendarEventOrderedByStartAsc(
-        reference_calendar_event.clone(),
-    ));
+    let replaced = context
+        .update_events
+        .insert(reference_calendar_event.clone());
 
     if replaced {
         info!("event updated {}", reference_calendar_event.id);
@@ -136,7 +136,7 @@ impl CalendarModule {
         info!("starting...");
 
         let context = Context {
-            update_events: BTreeSet::new(),
+            update_events: HashSet::new(),
             now: None,
             utc_offset: None,
         };
@@ -148,7 +148,7 @@ impl CalendarModule {
 
     async fn try_restore(
         bus: &BusSender,
-        calendar_events: &mut BTreeSet<CalendarEventOrderedByStartAsc>,
+        calendar_events: &mut HashSet<CalendarEvent>,
         posponed_restore: PersistenceUnit,
         utc_offset: UtcOffset,
     ) -> bool {
@@ -173,7 +173,7 @@ impl CalendarModule {
                     let mut batch = Vec::with_capacity(chunk_size);
 
                     for event in chunk.into_iter() {
-                        calendar_events.insert(CalendarEventOrderedByStartAsc(event.clone()));
+                        calendar_events.insert(event.clone());
                         batch.push(event);
                     }
 
@@ -198,21 +198,21 @@ impl CalendarModule {
 
         let now = now.unwrap();
 
-        context.update_events.retain(|x| x.0.end >= now);
+        context.update_events.retain(|x| x.end >= now);
 
         Self::set_reminders(context, bus);
 
         let calendar_events = context.update_events.iter();
 
         let event_keys: Vec<CalendarEventKey> = calendar_events
-            .map(|x| CalendarEventKey(x.0.kind, x.0.id))
+            .map(|x| CalendarEventKey(x.kind, x.id))
             .collect();
 
         let calendar_events = context.update_events.iter();
 
         let dtos: Vec<CalendarEventDto> = calendar_events
             .into_iter()
-            .map(|x| CalendarEventDto::from(&x.0))
+            .map(|x| CalendarEventDto::from(x))
             .collect();
 
         let calendar_state_dto = CalendarStateDto::new(dtos, now.into());
@@ -229,18 +229,18 @@ impl CalendarModule {
         let reminders: Vec<_> = context
             .update_events
             .iter()
-            .filter(|x| x.0.start >= now && x.0.end - x.0.start < Duration::days(1))
+            .filter(|x| x.start >= now && x.end - x.start < Duration::days(1))
             .flat_map(|x| {
                 return vec![
                     Reminder {
-                        event_id: x.0.id,
+                        event_id: x.id,
                         kind: blinky_shared::reminders::ReminderKind::Notification,
-                        remind_at: x.0.start - Duration::minutes(10),
+                        remind_at: x.start - Duration::minutes(10),
                     },
                     Reminder {
-                        event_id: x.0.id,
+                        event_id: x.id,
                         kind: blinky_shared::reminders::ReminderKind::Event,
-                        remind_at: x.0.start,
+                        remind_at: x.start,
                     },
                 ];
             })
