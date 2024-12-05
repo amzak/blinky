@@ -119,7 +119,13 @@ impl Hash for CalendarEvent {
 
 impl Ord for CalendarEvent {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        other.start.cmp(&self.start)
+        let order = other.start.cmp(&self.start);
+
+        if matches!(order, std::cmp::Ordering::Equal) {
+            return other.id.cmp(&self.id);
+        }
+
+        return order;
     }
 }
 
@@ -131,7 +137,13 @@ impl PartialOrd for CalendarEvent {
 
 impl Ord for CalendarEventOrderedByStartAsc {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.0.start.cmp(&other.0.start)
+        let order = self.0.start.cmp(&other.0.start);
+
+        if matches!(order, std::cmp::Ordering::Equal) {
+            return self.0.id.cmp(&other.0.id);
+        }
+
+        return order;
     }
 }
 
