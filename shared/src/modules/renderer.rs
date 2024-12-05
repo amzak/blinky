@@ -188,7 +188,6 @@ where
 
         let bounds = Self::render_time(frame, vm);
         Self::render_day(frame, vm, &bounds);
-        Self::draw_arrow(frame, vm);
     }
 
     fn render_clock_face(
@@ -337,29 +336,6 @@ where
             top_left,
             day_text_style,
             embedded_graphics::text::Alignment::Right,
-        );
-    }
-
-    fn draw_arrow(frame: &mut TDisplay::FrameBuffer<'_>, vm: &TimeViewModel) {
-        let now = vm.time.unwrap();
-
-        let zero_time = Time::from_hms(0, 0, 0).unwrap();
-        let today_midnight = now.replace_time(zero_time);
-        let time_pos = now - today_midnight;
-
-        let angle = ((time_pos.whole_minutes() as f32 / (12.0 * 60.0)) * 360.0) % 360.0;
-        let length: f32 = 15.0;
-
-        let radius = (TDisplay::FRAME_BUFFER_SIDE / 2) as f32;
-
-        let style = PrimitiveStyle::with_stroke(TDisplay::ColorModel::RED, 3);
-
-        Self::render_radial_line::<TDisplay::ColorModel>(
-            frame,
-            Angle::from_degrees(angle),
-            radius,
-            length,
-            style,
         );
     }
 
