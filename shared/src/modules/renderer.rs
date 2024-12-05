@@ -825,12 +825,13 @@ where
             .iter()
             .filter(|x| x.start <= now && x.end > now);
 
-        let current_finite_events = current_events.clone().filter(|x| x.end - now <= HALF_DAY);
+        let current_finite_events = current_events.clone().filter(|x| x.end - now < HALF_DAY);
 
         Self::render_current_finite_events(current_finite_events, frame, &now);
 
-        let current_ambient_events: Vec<&CalendarEvent> =
-            current_events.filter(|x| x.end - now > HALF_DAY).collect();
+        let current_ambient_events: Vec<&CalendarEvent> = current_events
+            .filter(|x| x.end - x.start >= HALF_DAY)
+            .collect();
 
         Self::render_currrent_ambient_events(frame, current_ambient_events);
 
@@ -874,7 +875,7 @@ where
         let p1 = Point::new((radius * sin) as i32, (radius * cos) as i32);
 
         let color = if event.color == 0 {
-            TDisplay::ColorModel::WHITE
+            TDisplay::ColorModel::BLACK
         } else {
             TDisplay::ColorModel::from(RawU16::from_u32(event.color))
         };
