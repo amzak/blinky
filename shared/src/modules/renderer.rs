@@ -943,19 +943,24 @@ where
 
         let event_start_rel = event.start - now;
 
-        let start_angle = if event.start <= now {
-            Angle::zero()
+        let style = EventTagStyle::default(event.icon, TDisplay::ColorModel::BLACK);
+
+        if event.start <= now {
+            let zero_point = Self::get_zero_point();
+            let outer_radius: f32 = event_arc_diameter as f32 / 2.0;
+            let p1 = Point::new(0, outer_radius as i32);
+            Self::render_event_icon(frame, zero_point - p1, &style);
         } else {
-            Angle::from_radians(
+            if event.start - now <= Duration::minutes(30) {}
+
+            let start_angle = Angle::from_radians(
                 (event_start_rel.whole_minutes() as f32 / HALF_DAY.whole_minutes() as f32)
                     * PI
                     * 2.0,
-            )
+            );
+
+            Self::render_event_tag(frame, start_angle, event_arc_diameter as f32, style);
         };
-
-        let style = EventTagStyle::default(event.icon, TDisplay::ColorModel::BLACK);
-
-        Self::render_event_tag(frame, start_angle, event_arc_diameter as f32, style);
     }
 
     fn render_time_range_arc(
