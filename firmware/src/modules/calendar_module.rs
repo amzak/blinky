@@ -1,5 +1,5 @@
 use crate::modules::reference_time::ReferenceTimeUtc;
-use blinky_shared::calendar::{CalendarEventKey, CalendarEventOrderedByStartAsc};
+use blinky_shared::calendar::CalendarEventKey;
 use blinky_shared::reminders::Reminder;
 use itertools::Itertools;
 use log::{error, info, warn};
@@ -60,6 +60,8 @@ impl BusHandler<Context> for CalendarModule {
                 bus.send_event(Events::CalendarEventsBatch(batch));
             }
             Events::ReferenceCalendarEventDropsBatch(batch) => {
+                handle_events_drop(context, batch.as_slice());
+
                 bus.send_event(Events::DropCalendarEventsBatch(batch));
             }
             Events::InSync(true) => {
@@ -128,6 +130,20 @@ fn handle_event_update(context: &mut Context, reference_calendar_event: &Calenda
 
     if replaced {
         info!("event updated {}", reference_calendar_event.id);
+    }
+}
+
+fn handle_events_drop(context: &mut Context, events_keys: &[CalendarEventKey]) {
+    let mut set: HashSet<CalendarEventKey> = HashSet::new();
+
+    for event_key in events_keys.iter() {
+        set.insert(event_key.clone());
+    }
+
+    context.update_events.retain(|x| !set.contains(&x.key()));
+
+    if !set.is_empty() {
+        info!("removed {} events", set.len());
     }
 }
 
