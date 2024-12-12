@@ -9,6 +9,7 @@ pub mod fasttrack;
 pub mod message_bus;
 pub mod modules;
 pub mod persistence;
+pub mod reference_data;
 pub mod reminders;
 
 pub fn add(left: usize, right: usize) -> usize {

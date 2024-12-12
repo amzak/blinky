@@ -1,5 +1,5 @@
-use crate::modules::reference_time::ReferenceTimeUtc;
 use blinky_shared::calendar::CalendarEventKey;
+use blinky_shared::domain::ReferenceTimeUtc;
 use blinky_shared::reminders::Reminder;
 use itertools::Itertools;
 use log::{error, info, warn};
