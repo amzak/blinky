@@ -282,7 +282,7 @@ impl ReferenceTime {
 
     fn handle_unprocessed_event_drops(bus: &MessageBus, context: &mut ProcessingContext) {
         let events_iter: Vec<_> = context
-            .unprocessed_event_updates
+            .unprocessed_event_drops
             .drain(..)
             .map(|x| {
                 let drop: DropCalendarEventPacket =
