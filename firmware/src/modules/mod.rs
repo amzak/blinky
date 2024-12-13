@@ -6,7 +6,6 @@ pub mod module;
 pub mod persister_module;
 pub mod power_module;
 pub mod reference_data;
-pub mod reference_time;
 pub mod rtc_display_fasttrack;
 pub mod rtc_module;
 pub mod time_sync;

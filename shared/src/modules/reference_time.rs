@@ -1,9 +1,9 @@
-use blinky_shared::calendar::{CalendarEvent, CalendarEventKey};
-use blinky_shared::contract::packets::{
+use crate::calendar::{CalendarEvent, CalendarEventKey};
+use crate::contract::packets::{
     CalendarEventsMetaPacket, DropCalendarEventPacket, ReferenceCalendarEventPacket,
     ReferenceDataPacket, ReferenceDataPacketType, ReferenceLocationPacket, ReferenceTimePacket,
 };
-use blinky_shared::error::Error;
+use crate::error::Error;
 use log::{error, info};
 use std::ops::Add;
 use std::sync::Arc;
@@ -11,10 +11,10 @@ use time::{OffsetDateTime, UtcOffset};
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::time::Duration;
 
-use blinky_shared::commands::Commands;
-use blinky_shared::events::Events;
+use crate::commands::Commands;
+use crate::events::Events;
 
-use blinky_shared::message_bus::{BusHandler, BusSender, MessageBus};
+use crate::message_bus::{BusHandler, BusSender, MessageBus};
 
 pub struct ReferenceTime {}
 
