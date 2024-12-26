@@ -3,10 +3,9 @@ use serde_repr::{Deserialize_repr, Serialize_repr};
 use serde_with::serde_as;
 use serde_with::Bytes;
 
-use crate::{
-    calendar::{CalendarEventDto, CalendarKind},
-    domain::{GpsCoordinates, ReferenceTimeOffset},
-};
+use crate::calendar::{CalendarEventDto, CalendarKind};
+use crate::reference_data::GpsCoordinates;
+use crate::reference_data::ReferenceTimeOffset;
 
 #[derive(Debug, Serialize_repr, Deserialize_repr, PartialEq, Clone)]
 #[repr(u16)]

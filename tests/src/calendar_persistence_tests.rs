@@ -25,6 +25,7 @@ async fn should_serialize_and_deserialize_persistence_unit() {
         color: 0,
         kind: CalendarKind::Phone,
         description: "".to_string(),
+        lane: 0,
     };
 
     let persistence_unit = PersistenceUnit::new(PersistenceUnitKind::CalendarSyncInfo, &event);

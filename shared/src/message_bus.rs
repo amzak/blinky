@@ -82,7 +82,7 @@ impl MessageBus {
     }
 
     #[inline]
-    pub async fn handle<TContext, THandler>(mut bus: MessageBus, mut context: TContext)
+    pub async fn handle<TContext, THandler>(mut bus: MessageBus, mut context: TContext) -> TContext
     where
         THandler: BusHandler<TContext>,
     {
@@ -121,9 +121,10 @@ impl MessageBus {
                 break;
             }
         }
-        //
 
         info!("done {}", handler_type);
+
+        context
     }
 
     async fn handle_command_or_event<TContext, THandler>(
@@ -183,12 +184,13 @@ impl MessageBus {
         loop {
             let event_res = events_receiver.recv().await;
             match event_res {
-                Ok(event) => match event {
-                    Events::FirstRender => {
+                Ok(event) => {
+                    error!("comparing events {:?} target {:?}", event, target_event);
+
+                    if std::mem::discriminant(&event) == std::mem::discriminant(&target_event) {
                         break;
                     }
-                    _ => {}
-                },
+                }
                 Err(err) => {
                     error!("waiting for {:?} {:?}", err, target_event)
                 }

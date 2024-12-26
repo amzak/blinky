@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use time::{OffsetDateTime, UtcOffset};
 
-#[derive(Debug, Deserialize, PartialEq, Clone)]
+#[derive(Debug, Deserialize, Serialize, PartialEq, Clone)]
 pub struct ReferenceTimeOffset {
     pub now: i64,
     pub offset_seconds: i32,

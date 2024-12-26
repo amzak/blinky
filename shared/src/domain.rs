@@ -1,19 +1,10 @@
 use serde::{Deserialize, Serialize};
 use time::{OffsetDateTime, UtcOffset};
 
-use crate::calendar::CalendarEventDto;
-
-#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
-pub struct ReferenceTimeOffset {
-    pub now: i64,
-    pub offset_seconds: i32,
-}
-
-#[derive(Debug, Deserialize, PartialEq, Clone)]
-pub struct GpsCoordinates {
-    pub lat: f32,
-    pub lon: f32,
-}
+use crate::{
+    calendar::CalendarEventDto,
+    reference_data::{GpsCoordinates, ReferenceTimeOffset},
+};
 
 #[derive(Debug, Deserialize, PartialEq, Clone)]
 pub struct ReferenceData {

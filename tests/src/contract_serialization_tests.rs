@@ -4,7 +4,7 @@ use blinky_shared::{
         CalendarEventSyncResponsePacket, ReferenceDataPacket, ReferenceDataPacketType,
         ReferenceTimePacket,
     },
-    domain::ReferenceTimeOffset,
+    reference_data::ReferenceTimeOffset,
 };
 use serde::de::value::BytesDeserializer;
 use time::OffsetDateTime;

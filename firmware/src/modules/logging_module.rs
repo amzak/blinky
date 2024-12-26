@@ -33,10 +33,10 @@ impl BusHandler<ContextStub> for LoggingModule {
 }
 
 impl LoggingModule {
-    pub fn start(bus: MessageBus) -> impl Future<Output = ()> {
+    pub async fn start(bus: MessageBus) {
         info!("starting...");
         let context = ContextStub {};
 
-        MessageBus::handle::<ContextStub, Self>(bus, context)
+        MessageBus::handle::<ContextStub, Self>(bus, context).await;
     }
 }
