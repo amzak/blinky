@@ -3,9 +3,11 @@ use serde_repr::{Deserialize_repr, Serialize_repr};
 use serde_with::serde_as;
 use serde_with::Bytes;
 
+use crate::calendar::TimelyDataMarker;
 use crate::calendar::{CalendarEventDto, CalendarKind};
 use crate::reference_data::GpsCoordinates;
 use crate::reference_data::ReferenceTimeOffset;
+use crate::reference_data::ReferenceTimeUtc;
 
 #[derive(Debug, Serialize_repr, Deserialize_repr, PartialEq, Clone)]
 #[repr(u16)]
@@ -16,6 +18,7 @@ pub enum ReferenceDataPacketType {
     CalendarEventsMeta = 4,
     CalendarEventsSyncResponse = 5,
     DropCalendarEvent = 6,
+    TimelyData = 7,
 }
 
 #[serde_as]
@@ -68,9 +71,19 @@ pub struct ReferenceCalendarEventPacket {
 }
 
 #[derive(Debug, Deserialize, PartialEq, Clone)]
+pub struct ReferenceTimelyDataPacket {
+    pub linked_event_id: i32,
+    pub start_at_hour: u8,
+    pub duration_hours: u8,
+    pub value: f32,
+    pub data_marker: TimelyDataMarker,
+}
+
+#[derive(Debug, Deserialize, PartialEq, Clone)]
 pub struct CalendarEventsMetaPacket {
     pub update_events_count: u16,
     pub drop_events_count: u16,
+    pub timely_data_count: u16,
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]

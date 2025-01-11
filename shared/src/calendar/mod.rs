@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
 use time::{Duration, OffsetDateTime, UtcOffset};
 
-use crate::domain::ReferenceTimeUtc;
+use crate::reference_data::ReferenceTimeUtc;
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone, Copy)]
 #[repr(u8)]
@@ -19,6 +19,7 @@ pub enum CalendarEventIcon {
     Rain = 7,
     CalendarAlert = 8,
     Alarm = 9,
+    Temperature = 10,
 }
 
 #[derive(Debug, Serialize_repr, Deserialize_repr, PartialEq, Clone, Copy, Hash)]
@@ -28,6 +29,14 @@ pub enum CalendarKind {
     Phone = 1,
     Trains = 2,
     Weather = 3,
+}
+
+#[derive(Debug, Serialize_repr, Deserialize_repr, PartialEq, Clone, Copy, Hash)]
+#[repr(u8)]
+pub enum TimelyDataMarker {
+    Unknown = 0,
+    Precipitation = 1,
+    Temperature = 2,
 }
 
 #[derive(Debug, Serialize_repr, Deserialize_repr, PartialEq, Clone, Copy, Hash)]
@@ -49,6 +58,21 @@ pub struct CalendarEvent {
     pub color: u32,
     pub description: String,
     pub lane: u8,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct TimelyDataRecord {
+    pub linked_event_id: i32,
+    pub start_at_hour: u8,
+    pub duration: Duration,
+    pub value: f32,
+    pub data_marker: TimelyDataMarker,
+}
+
+#[derive(Clone, Debug)]
+pub struct EventTimelyData {
+    pub linked_event_id: i32,
+    pub timely_data: Vec<TimelyDataRecord>,
 }
 
 #[derive(Clone, Debug)]
@@ -210,3 +234,23 @@ impl PartialEq<Self> for CalendarEventOrderedByStartAsc {
 }
 
 impl Eq for CalendarEventOrderedByStartAsc {}
+
+impl Hash for TimelyDataRecord {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.linked_event_id.hash(state);
+        self.data_marker.hash(state);
+        self.start_at_hour.hash(state);
+        self.duration.hash(state);
+    }
+}
+
+impl Eq for TimelyDataRecord {}
+
+impl PartialEq<Self> for TimelyDataRecord {
+    fn eq(&self, other: &Self) -> bool {
+        self.linked_event_id == other.linked_event_id
+            && self.duration == other.duration
+            && self.data_marker == other.data_marker
+            && self.start_at_hour == other.start_at_hour
+    }
+}

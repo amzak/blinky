@@ -11,6 +11,7 @@ pub enum PersistenceUnitKind {
     RtcSyncInfo,
     CalendarEventInfo,
     CalendarSyncInfo,
+    TimelyData,
 }
 
 #[derive(Debug)]

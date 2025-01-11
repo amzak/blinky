@@ -1,7 +1,8 @@
-use crate::calendar::{CalendarEvent, CalendarEventKey};
+use crate::calendar::{CalendarEvent, CalendarEventKey, TimelyDataRecord};
 use crate::contract::packets::{
     CalendarEventsMetaPacket, DropCalendarEventPacket, ReferenceCalendarEventPacket,
     ReferenceDataPacket, ReferenceDataPacketType, ReferenceLocationPacket, ReferenceTimePacket,
+    ReferenceTimelyDataPacket,
 };
 use crate::error::Error;
 use log::{error, info};
@@ -26,8 +27,10 @@ pub struct ProcessingContext {
     now_opt: Option<OffsetDateTime>,
     unprocessed_event_updates: Vec<ReferenceDataPacket>,
     unprocessed_event_drops: Vec<ReferenceDataPacket>,
+    unprocessed_timely_data: Vec<ReferenceDataPacket>,
     update_events_count: u16,
     drop_events_count: u16,
+    timely_data_count: u16,
 }
 
 impl BusHandler<Context> for ReferenceTime {
@@ -78,8 +81,10 @@ impl ReferenceTime {
             now_opt: None,
             unprocessed_event_updates: vec![],
             unprocessed_event_drops: vec![],
+            unprocessed_timely_data: vec![],
             update_events_count: 0,
             drop_events_count: 0,
+            timely_data_count: 0,
         };
 
         loop {
@@ -139,20 +144,31 @@ impl ReferenceTime {
 
                         context.update_events_count = events_meta.update_events_count;
                         context.drop_events_count = events_meta.drop_events_count;
+                        context.timely_data_count = events_meta.timely_data_count;
 
-                        info!("expecting {} events", context.update_events_count);
+                        info!("expecting:");
+                        info!("\t{} events", context.update_events_count);
+                        info!("\t{} drops", context.drop_events_count);
+                        info!("\t{} timely records", context.timely_data_count);
                     }
                     ReferenceDataPacketType::CalendarEvent => {
                         context.unprocessed_event_updates.push(reference_data);
 
-                        if Self::is_sync_data_ready(&context) {
+                        if Self::is_reference_data_ready(&context) {
                             Self::handle_sync_completed(context, bus);
                         }
                     }
                     ReferenceDataPacketType::DropCalendarEvent => {
                         context.unprocessed_event_drops.push(reference_data);
 
-                        if Self::is_sync_data_ready(&context) {
+                        if Self::is_reference_data_ready(&context) {
+                            Self::handle_sync_completed(context, bus);
+                        }
+                    }
+                    ReferenceDataPacketType::TimelyData => {
+                        context.unprocessed_timely_data.push(reference_data);
+
+                        if Self::is_reference_data_ready(&context) {
                             Self::handle_sync_completed(context, bus);
                         }
                     }
@@ -202,10 +218,13 @@ impl ReferenceTime {
     fn handle_sync_completed(context: &mut ProcessingContext, bus: &MessageBus) {
         let offset_seconds = context.now_opt.unwrap().offset();
 
-        if context.unprocessed_event_updates.len() > 0 || context.unprocessed_event_drops.len() > 0
+        if context.unprocessed_event_updates.len() > 0
+            || context.unprocessed_event_drops.len() > 0
+            || context.unprocessed_timely_data.len() > 0
         {
             Self::handle_unprocessed_event_updates(bus, context, offset_seconds);
             Self::handle_unprocessed_event_drops(bus, context);
+            Self::handle_unprocessed_timely_data(bus, context);
         }
 
         bus.send_event(Events::InSync(true));
@@ -258,11 +277,36 @@ impl ReferenceTime {
         }
     }
 
-    fn is_sync_data_ready(context: &ProcessingContext) -> bool {
+    fn is_reference_data_ready(context: &ProcessingContext) -> bool {
         let expected_updates = context.update_events_count as usize;
         let expected_drops = context.drop_events_count as usize;
+        let expected_timely_records = context.timely_data_count as usize;
 
         return expected_updates == context.unprocessed_event_updates.len()
-            && expected_drops == context.unprocessed_event_drops.len();
+            && expected_drops == context.unprocessed_event_drops.len()
+            && expected_timely_records == context.unprocessed_timely_data.len();
+    }
+
+    fn handle_unprocessed_timely_data(bus: &MessageBus, context: &mut ProcessingContext) {
+        let events_iter: Vec<_> = context
+            .unprocessed_timely_data
+            .drain(..)
+            .map(|x| {
+                let packet: ReferenceTimelyDataPacket =
+                    rmp_serde::from_slice(&x.packet_payload).unwrap();
+
+                TimelyDataRecord {
+                    linked_event_id: packet.linked_event_id,
+                    start_at_hour: packet.start_at_hour,
+                    duration: time::Duration::hours(packet.duration_hours as i64),
+                    value: packet.value,
+                    data_marker: packet.data_marker,
+                }
+            })
+            .collect();
+
+        for chunk in events_iter.chunks(5) {
+            bus.send_event(Events::ReferenceTimelyDataBatch(Arc::new(chunk.to_vec())));
+        }
     }
 }

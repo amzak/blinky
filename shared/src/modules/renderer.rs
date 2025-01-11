@@ -6,7 +6,7 @@ use embedded_graphics::text::renderer::CharacterStyle;
 use embedded_graphics::text::Text;
 use embedded_graphics_framebuf::FrameBuf;
 use enumflags2::BitFlags;
-use time::{Duration, OffsetDateTime, Time};
+use time::{Duration, OffsetDateTime};
 
 use time::macros::format_description;
 
@@ -17,8 +17,8 @@ use embedded_icon::prelude::*;
 use tinytga::Tga;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 
-use crate::calendar::CalendarEventIcon;
-use crate::calendar::{CalendarEvent, CalendarEventKey};
+use crate::calendar::{self, CalendarEvent, CalendarEventKey};
+use crate::calendar::{CalendarEventIcon, TimelyDataRecord};
 use crate::commands::Commands;
 use crate::display_interface::{ClockDisplayInterface, LayerType, RenderMode};
 use crate::events::Events;
@@ -26,7 +26,7 @@ use crate::fasttrack::FastTrackRtcData;
 use crate::message_bus::{BusHandler, BusSender, MessageBus};
 use embedded_graphics::primitives::{PrimitiveStyle, StyledDrawable};
 use embedded_graphics::{mono_font::MonoTextStyle, prelude::*, primitives};
-use std::collections::{BTreeSet, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::f32::consts::PI;
 use std::marker::PhantomData;
 use std::sync::Arc;
@@ -59,6 +59,7 @@ struct ViewModel {
     ble_connected: Option<bool>,
     temperature: Option<i32>,
     calendar_events: BTreeSet<CalendarEvent>,
+    timely_data: HashMap<i32, Vec<TimelyDataRecord>>,
 
     force_render_events: bool,
 
@@ -148,7 +149,8 @@ impl<TDisplay> Renderer<TDisplay> {
             | Events::Reminder(_)
             | Events::AccelerometerInterrupt(_)
             | Events::RtcAlarmInterrupt(_)
-            | Events::Key1Press => {
+            | Events::Key1Press
+            | Events::EventTimelyData(_) => {
                 return true;
             }
             _ => false,
@@ -559,6 +561,7 @@ where
             is_past_first_frame: false,
             alarm_counter: if rtc_data.alarm_status { 10 } else { 0 },
             gesture: 0,
+            timely_data: HashMap::new(),
         };
 
         let mut static_rendered = false;
@@ -675,6 +678,9 @@ where
             }
             Events::AccelerometerInterrupt(gesture) => {
                 view_model.gesture = gesture;
+            }
+            Events::EventTimelyData(data) => {
+                append_timely_data(view_model, data);
             }
             _ => {
                 state_changed = false;
@@ -825,7 +831,9 @@ where
             .iter()
             .filter(|x| x.start <= now && x.end > now);
 
-        let current_finite_events = current_events.clone().filter(|x| x.end - now < HALF_DAY);
+        let current_finite_events = current_events
+            .clone()
+            .filter(|x| (x.end - now) < HALF_DAY && (x.end - x.start) < HALF_DAY);
 
         Self::render_current_finite_events(current_finite_events, frame, &now);
 
@@ -1122,8 +1130,6 @@ fn append_event(view_model: &mut ViewModel, calendar_event: &CalendarEvent) {
 }
 
 fn drop_events(view_model: &mut ViewModel, events_keys: Arc<Vec<CalendarEventKey>>) {
-    let old_count = view_model.calendar_events.len();
-
     let mut set: HashSet<CalendarEventKey> = HashSet::new();
 
     for event_key in events_keys.iter() {
@@ -1134,9 +1140,16 @@ fn drop_events(view_model: &mut ViewModel, events_keys: Arc<Vec<CalendarEventKey
         .calendar_events
         .retain(|x| !set.contains(&x.key()));
 
-    let new_count = view_model.calendar_events.len();
-
     if !set.is_empty() {
+        info!("removed {} events", set.len());
         view_model.force_render_events = true;
     }
+}
+
+fn append_timely_data(view_model: &mut ViewModel, data: calendar::EventTimelyData) {
+    let linked_event_id = &data.linked_event_id;
+
+    view_model
+        .timely_data
+        .insert(*linked_event_id, data.timely_data);
 }

@@ -1,21 +1,25 @@
-use blinky_shared::calendar::CalendarEventKey;
-use blinky_shared::domain::ReferenceTimeUtc;
-use blinky_shared::reminders::Reminder;
 use itertools::Itertools;
 use log::{error, info, warn};
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
+use std::slice::Iter;
 use std::sync::Arc;
 use time::{Duration, OffsetDateTime, UtcOffset};
 
-use blinky_shared::message_bus::{BusHandler, BusSender, MessageBus};
-use blinky_shared::{
+use crate::calendar::{
+    CalendarEventKey, CalendarKind, EventTimelyData, TimelyDataMarker, TimelyDataRecord,
+};
+use crate::reference_data::ReferenceTimeUtc;
+use crate::reminders::Reminder;
+use crate::{
     calendar::CalendarEvent,
     error::Error,
     events::Events,
     persistence::{PersistenceUnit, PersistenceUnitKind},
 };
-use blinky_shared::{calendar::CalendarEventDto, commands::Commands};
+use crate::{calendar::CalendarEventDto, commands::Commands};
+use crate::{message_bus, reminders};
+use message_bus::{BusHandler, BusSender, MessageBus};
 pub struct CalendarModule {}
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -23,19 +27,26 @@ pub struct CalendarStateDto {
     pub version: i32,
     pub last_sync: ReferenceTimeUtc,
     pub events: Vec<CalendarEventDto>,
+    pub timely_data: Vec<TimelyDataRecord>,
 }
 
 struct Context {
     update_events: HashSet<CalendarEvent>,
+    timely_data: HashMap<i32, HashSet<TimelyDataRecord>>,
     now: Option<OffsetDateTime>,
     utc_offset: Option<UtcOffset>,
 }
 
 impl CalendarStateDto {
-    pub fn new(events: Vec<CalendarEventDto>, last_sync: ReferenceTimeUtc) -> Self {
+    pub fn new(
+        events: Vec<CalendarEventDto>,
+        timely_data: Vec<TimelyDataRecord>,
+        last_sync: ReferenceTimeUtc,
+    ) -> Self {
         Self {
-            version: 2,
+            version: 3,
             events,
+            timely_data,
             last_sync,
         }
     }
@@ -64,12 +75,16 @@ impl BusHandler<Context> for CalendarModule {
 
                 bus.send_event(Events::DropCalendarEventsBatch(batch));
             }
+            Events::ReferenceTimelyDataBatch(batch) => {
+                handle_timely_data(context, batch.iter());
+            }
             Events::InSync(true) => {
                 if context.update_events.len() == 0 {
                     return;
                 }
 
-                Self::persist_events(bus, context).await;
+                Self::send_timely_data(bus, context);
+                Self::persist_state(bus, context).await;
 
                 info!("events persisted");
             }
@@ -89,13 +104,7 @@ impl BusHandler<Context> for CalendarModule {
                     return;
                 }
 
-                Self::try_restore(
-                    bus,
-                    &mut context.update_events,
-                    unit,
-                    context.utc_offset.unwrap(),
-                )
-                .await;
+                Self::try_restore(bus, context, unit, context.utc_offset.unwrap()).await;
 
                 Self::set_reminders(context, bus);
             }
@@ -147,6 +156,22 @@ fn handle_events_drop(context: &mut Context, events_keys: &[CalendarEventKey]) {
     }
 }
 
+fn handle_timely_data(context: &mut Context, timely_records: Iter<TimelyDataRecord>) {
+    for timely_record in timely_records {
+        let linked_event_id = timely_record.linked_event_id;
+
+        if !context.timely_data.contains_key(&linked_event_id) {
+            context.timely_data.insert(linked_event_id, HashSet::new());
+        }
+
+        context
+            .timely_data
+            .get_mut(&linked_event_id)
+            .unwrap()
+            .insert(timely_record.clone());
+    }
+}
+
 impl CalendarModule {
     pub async fn start(bus: MessageBus) {
         info!("starting...");
@@ -155,6 +180,7 @@ impl CalendarModule {
             update_events: HashSet::new(),
             now: None,
             utc_offset: None,
+            timely_data: HashMap::new(),
         };
 
         MessageBus::handle::<Context, Self>(bus, context).await;
@@ -164,7 +190,7 @@ impl CalendarModule {
 
     async fn try_restore(
         bus: &BusSender,
-        calendar_events: &mut HashSet<CalendarEvent>,
+        context: &mut Context,
         posponed_restore: PersistenceUnit,
         utc_offset: UtcOffset,
     ) -> bool {
@@ -189,11 +215,16 @@ impl CalendarModule {
                     let mut batch = Vec::with_capacity(chunk_size);
 
                     for event in chunk.into_iter() {
-                        calendar_events.insert(event.clone());
+                        context.update_events.insert(event.clone());
                         batch.push(event);
                     }
 
                     bus.send_event(Events::CalendarEventsBatch(Arc::new(batch)));
+                }
+
+                if calendar_info_restored.version > 2 {
+                    handle_timely_data(context, calendar_info_restored.timely_data.iter());
+                    Self::send_timely_data(bus, context);
                 }
             }
             Err(error) => {
@@ -205,7 +236,7 @@ impl CalendarModule {
         return true;
     }
 
-    async fn persist_events(bus: &BusSender, context: &mut Context) {
+    async fn persist_state(bus: &BusSender, context: &mut Context) {
         let now = context.now;
 
         if now.is_none() {
@@ -231,7 +262,9 @@ impl CalendarModule {
             .map(|x| CalendarEventDto::from(x))
             .collect();
 
-        let calendar_state_dto = CalendarStateDto::new(dtos, now.into());
+        let timely_data_records = context.timely_data.drain().map(|x| x.1).flatten().collect();
+
+        let calendar_state_dto = CalendarStateDto::new(dtos, timely_data_records, now.into());
         let persistence_unit =
             PersistenceUnit::new(PersistenceUnitKind::CalendarSyncInfo, &calendar_state_dto);
 
@@ -250,12 +283,12 @@ impl CalendarModule {
                 return vec![
                     Reminder {
                         event_id: x.id,
-                        kind: blinky_shared::reminders::ReminderKind::Notification,
+                        kind: reminders::ReminderKind::Notification,
                         remind_at: x.start - Duration::minutes(10),
                     },
                     Reminder {
                         event_id: x.id,
-                        kind: blinky_shared::reminders::ReminderKind::Event,
+                        kind: reminders::ReminderKind::Event,
                         remind_at: x.start,
                     },
                 ];
@@ -264,5 +297,56 @@ impl CalendarModule {
             .collect();
 
         bus.send_cmd(Commands::SetReminders(reminders));
+    }
+
+    fn send_timely_data(bus: &BusSender, context: &mut Context) {
+        let now = context.now.unwrap();
+
+        let temperature_event_id = context
+            .update_events
+            .iter()
+            .find(|x| matches!(x.kind, CalendarKind::Weather))
+            .map(|x| x.id);
+
+        for timely_data in context.timely_data.drain() {
+            let (event_id, mut records) = timely_data;
+
+            let sorted = records
+                .iter()
+                .sorted_by(|x, y| x.start_at_hour.cmp(&y.start_at_hour));
+
+            if temperature_event_id.is_some() && event_id == temperature_event_id.unwrap() {
+                send_current_tmpr(bus, &now, sorted);
+            }
+
+            // let data = EventTimelyData {
+            //     linked_event_id: event_id,
+            //     timely_data: records,
+            // };
+
+            // bus.send_event(Events::EventTimelyData(data));
+        }
+    }
+}
+
+fn send_current_tmpr(
+    bus: &BusSender,
+    now: &OffsetDateTime,
+    records: std::vec::IntoIter<&TimelyDataRecord>,
+) {
+    let mut tmpr = None;
+
+    let current_hour = now.hour();
+
+    for record in records.filter(|x| matches!(x.data_marker, TimelyDataMarker::Temperature)) {
+        if record.start_at_hour > current_hour {
+            break;
+        }
+
+        tmpr = Some(record.value);
+    }
+
+    if tmpr.is_some() {
+        bus.send_event(Events::Temperature(tmpr.unwrap().round() as i32));
     }
 }

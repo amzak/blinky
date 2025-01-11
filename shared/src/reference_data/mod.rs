@@ -27,7 +27,7 @@ impl Into<OffsetDateTime> for ReferenceTimeUtc {
 }
 
 impl ReferenceTimeUtc {
-    pub fn _to_offset_dt(self, tz: UtcOffset) -> OffsetDateTime {
+    pub fn to_offset_dt(self, tz: UtcOffset) -> OffsetDateTime {
         OffsetDateTime::from_unix_timestamp(self.unix_epoch_seconds + tz.whole_seconds() as i64)
             .unwrap()
             .replace_offset(tz)

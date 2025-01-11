@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::calendar::{CalendarEvent, CalendarEventKey};
+use crate::calendar::{CalendarEvent, CalendarEventKey, EventTimelyData, TimelyDataRecord};
 use crate::domain::{ReferenceData, TouchPosition, WakeupCause};
 use crate::persistence::PersistenceUnit;
 use crate::reminders::Reminder;
@@ -27,8 +27,10 @@ pub enum Events {
     ReferenceCalendarEvent(CalendarEvent),
     ReferenceCalendarEventUpdatesBatch(Arc<Vec<CalendarEvent>>),
     ReferenceCalendarEventDropsBatch(Arc<Vec<CalendarEventKey>>),
+    ReferenceTimelyDataBatch(Arc<Vec<TimelyDataRecord>>),
     CalendarEvent(CalendarEvent),
     CalendarEventsBatch(Arc<Vec<CalendarEvent>>),
+    TimelyDataBatch(Arc<Vec<TimelyDataRecord>>),
     DropCalendarEventsBatch(Arc<Vec<CalendarEventKey>>),
     Restored(PersistenceUnit),
     PersistedCalendarEvents(Arc<Vec<CalendarEventKey>>),
@@ -37,4 +39,5 @@ pub enum Events {
     Term,
     AccelerometerInterrupt(u8),
     RtcAlarmInterrupt(bool),
+    EventTimelyData(EventTimelyData),
 }

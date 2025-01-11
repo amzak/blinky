@@ -1,1 +1,2 @@
+mod calendar_module_tests;
 mod reference_time_module_tests;

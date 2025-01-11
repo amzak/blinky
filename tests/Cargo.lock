@@ -109,6 +109,7 @@ dependencies = [
  "embedded-graphics-framebuf",
  "embedded-icon",
  "enumflags2",
+ "itertools",
  "log",
  "rmp-serde",
  "serde",
@@ -612,6 +613,15 @@ dependencies = [
  "equivalent",
  "hashbrown 0.14.5",
  "serde",
+]
+
+[[package]]
+name = "itertools"
+version = "0.13.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "413ee7dfc52ee1a4949ceeb7dbc8a33f2d6c088194d9f922fb8318faf1f01186"
+dependencies = [
+ "either",
 ]
 
 [[package]]

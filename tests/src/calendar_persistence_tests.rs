@@ -1,7 +1,7 @@
 use blinky_shared::{
     calendar::{CalendarEventDto, CalendarKind},
-    domain::ReferenceTimeUtc,
     persistence::{PersistenceUnit, PersistenceUnitKind},
+    reference_data::ReferenceTimeUtc,
 };
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;

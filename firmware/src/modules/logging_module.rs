@@ -1,5 +1,3 @@
-use std::future::Future;
-
 use blinky_shared::{commands::Commands, events::Events, message_bus::BusSender};
 use log::{error, info};
 
@@ -19,8 +17,11 @@ impl BusHandler<ContextStub> for LoggingModule {
                 }
             },
             Events::IncomingData(data) => {
-                info!("IncomingData {:02X?}", &data);
+                //info!("IncomingData {:02X?}", &data);
+                info!("IncomingData len {}", data.len());
             }
+            Events::EventTimelyData(_) => {}
+            Events::TimelyDataBatch(_) => {}
             _ => {
                 info!("{:?}", event);
             }
