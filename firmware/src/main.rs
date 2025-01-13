@@ -3,6 +3,7 @@
 #![feature(associated_type_bounds)]
 #![feature(type_alias_impl_trait)]
 #![feature(associated_type_defaults)]
+#![feature(generic_arg_infer)]
 
 use blinky_shared::commands::Commands;
 use blinky_shared::events::Events;
@@ -16,6 +17,8 @@ use esp_idf_hal::peripherals::Peripherals;
 use esp_idf_svc::log::{set_target_level, EspLogger};
 use log::*;
 use modules::rtc_display_fasttrack::RtcDisplayFastTrack;
+use peripherals::pins::mapping::PinsMapping;
+use peripherals::pins::twatch_2021::TWatch2021Pins;
 use peripherals::rtc::Rtc;
 use std::future::Future;
 use std::pin::Pin;
@@ -77,6 +80,8 @@ async fn main_async() -> Result<(), Box<dyn std::error::Error>> {
     info!("main_async...");
 
     let peripherals = Peripherals::take().unwrap();
+
+    let mut pins_mapping = TWatch2021Pins::new(peripherals.pins);
 
     let hal_conf = HalConfig {
         backlight: 21,
@@ -154,7 +159,8 @@ async fn main_async() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     let mb = message_bus.clone();
-    let power_task = PowerModule::start(peripherals.adc1, peripherals.pins.gpio36, pin_conf, mb);
+
+    let power_task = PowerModule::start(peripherals.adc1, &mut pins_mapping, pin_conf, mb);
 
     let mut rest: Vec<Pin<Box<dyn futures::Future<Output = ()>>>> = vec![
         Box::pin(power_task),

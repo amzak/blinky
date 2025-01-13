@@ -1,10 +1,12 @@
 use crate::peripherals::adc::AdcDevice;
 use crate::peripherals::hal::PinConfig;
 use crate::peripherals::output::PinOutput;
+use crate::peripherals::pins::mapping::PinsMapping;
 use blinky_shared::domain::WakeupCause;
 use blinky_shared::reminders::ReminderKind;
-use esp_idf_hal::adc::ADC1;
-use esp_idf_hal::gpio::{AnyIOPin, Gpio36, Level, PinDriver, Pull};
+use esp_idf_hal::adc::Adc;
+use esp_idf_hal::gpio::{ADCPin, AnyIOPin, Level, PinDriver, Pull};
+use esp_idf_hal::peripheral::Peripheral;
 use esp_idf_sys::{
     esp_sleep_ext1_wakeup_mode_t_ESP_EXT1_WAKEUP_ALL_LOW, esp_sleep_source_t_ESP_SLEEP_WAKEUP_ALL,
     esp_sleep_source_t_ESP_SLEEP_WAKEUP_EXT0, esp_sleep_source_t_ESP_SLEEP_WAKEUP_EXT1,
@@ -59,7 +61,16 @@ impl PowerModule {
     const TILL_DEEP_SLEEP_SEC: u64 = 30;
     const TILL_LIGHT_SLEEP_SEC: u64 = 10;
 
-    pub async fn start(adc: ADC1, gpio36: Gpio36, config: PinConfig, bus: MessageBus) {
+    pub async fn start<TAdc, TAdcPin, PM>(
+        adc: impl Peripheral<P = TAdc>,
+        pins_mapping: &mut PM,
+        config: PinConfig,
+        bus: MessageBus,
+    ) where
+        TAdc: Adc + 'static,
+        TAdcPin: ADCPin<Adc = TAdc> + 'static,
+        PM: PinsMapping<TAdcPin = TAdcPin>,
+    {
         info!("starting...");
 
         let backlight = Self::init_backlight(config.backlight);
@@ -78,7 +89,9 @@ impl PowerModule {
             Self::signal_reminder(&config, 2).await;
         }
 
-        let mut adc_device = AdcDevice::new(adc, gpio36);
+        let adc_pin = pins_mapping.get_adc_pin();
+
+        let mut adc_device = AdcDevice::new(adc, adc_pin);
 
         Self::announce_battery_level(&bus, &mut adc_device);
         tokio::time::sleep(Duration::from_secs(1)).await;
@@ -240,7 +253,7 @@ impl PowerModule {
         bus.send_event(Events::Wakeup(wakeup_cause.clone()));
     }
 
-    fn announce_battery_level(bus: &MessageBus, adc: &mut AdcDevice) {
+    fn announce_battery_level<TAdcPin: ADCPin>(bus: &MessageBus, adc: &mut AdcDevice<TAdcPin>) {
         let adc_value = adc.read();
 
         let is_charging = Self::is_charging();
