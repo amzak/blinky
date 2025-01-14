@@ -5,7 +5,7 @@ use crate::peripherals::pins::mapping::PinsMapping;
 use blinky_shared::domain::WakeupCause;
 use blinky_shared::reminders::ReminderKind;
 use esp_idf_hal::adc::Adc;
-use esp_idf_hal::gpio::{ADCPin, AnyIOPin, Level, PinDriver, Pull};
+use esp_idf_hal::gpio::{ADCPin, AnyIOPin, Level, OutputPin, PinDriver, Pull};
 use esp_idf_hal::peripheral::Peripheral;
 use esp_idf_sys::{
     esp_sleep_ext1_wakeup_mode_t_ESP_EXT1_WAKEUP_ALL_LOW, esp_sleep_source_t_ESP_SLEEP_WAKEUP_ALL,
@@ -61,19 +61,23 @@ impl PowerModule {
     const TILL_DEEP_SLEEP_SEC: u64 = 30;
     const TILL_LIGHT_SLEEP_SEC: u64 = 10;
 
-    pub async fn start<TAdc, TAdcPin, PM>(
+    pub async fn start<TAdc, TAdcPin, TBacklightPin, PM>(
         adc: impl Peripheral<P = TAdc>,
         pins_mapping: &mut PM,
         config: PinConfig,
         bus: MessageBus,
     ) where
-        TAdc: Adc + 'static,
-        TAdcPin: ADCPin<Adc = TAdc> + 'static,
-        PM: PinsMapping<TAdcPin = TAdcPin>,
+        TAdc: Adc,
+        TAdcPin: ADCPin<Adc = TAdc>,
+        TBacklightPin: OutputPin,
+        PM: PinsMapping<TAdcPin = TAdcPin, TBacklightPin = TBacklightPin>,
     {
         info!("starting...");
 
-        let backlight = Self::init_backlight(config.backlight);
+        let backlight_pin = pins_mapping.get_backlight_pin();
+        let backlight_pin_index = backlight_pin.pin();
+
+        let backlight = Self::init_backlight(backlight_pin_index);
         let idle_reset = Arc::new(Notify::new());
 
         let idle_scenario = tokio::spawn(Self::idle_sequence(

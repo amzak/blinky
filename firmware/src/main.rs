@@ -84,15 +84,11 @@ async fn main_async() -> Result<(), Box<dyn std::error::Error>> {
     let mut pins_mapping = TWatch2021Pins::new(peripherals.pins);
 
     let hal_conf = HalConfig {
-        backlight: 21,
         touch_interrupt_pin: 12,
         touch_reset_pin: 33,
     };
 
-    let pin_conf = PinConfig {
-        backlight: 21,
-        vibro: 4,
-    };
+    let pin_conf = PinConfig { vibro: 4 };
 
     let message_bus = MessageBus::new();
 
@@ -104,7 +100,7 @@ async fn main_async() -> Result<(), Box<dyn std::error::Error>> {
     let wait_for_first_render_task = mb.wait_for(Events::FirstRender);
 
     let i2c_proxy = hal.get_i2c_proxy_async().clone();
-    let fasttrack_result = RtcDisplayFastTrack::run_and_decompose(hal_conf, i2c_proxy);
+    let fasttrack_result = RtcDisplayFastTrack::run_and_decompose(i2c_proxy, &mut pins_mapping);
 
     let rtc_task = start_rtc(&message_bus, fasttrack_result.rtc);
 

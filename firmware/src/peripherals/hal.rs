@@ -12,13 +12,11 @@ pub struct HAL<'d> {
 
 #[derive(Clone, Copy)]
 pub struct HalConfig {
-    pub backlight: i32,
     pub touch_interrupt_pin: i32,
     pub touch_reset_pin: i32,
 }
 
 pub struct PinConfig {
-    pub backlight: i32,
     pub vibro: i32,
 }
 

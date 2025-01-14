@@ -3,12 +3,13 @@ use blinky_shared::{
     fasttrack::FastTrackRtcData,
     modules::renderer::{Renderer, TimeViewModel},
 };
-use esp_idf_hal::i2c::I2cDriver;
+use esp_idf_hal::{gpio::OutputPin, i2c::I2cDriver};
 use peripherals::i2c_proxy_async::I2cProxyAsync;
 use time::UtcOffset;
 
 use crate::peripherals::{
-    display::ClockDisplay, hal::HalConfig, output::PinOutput, rtc::Rtc, rtc_memory::UTC_OFFSET,
+    display::ClockDisplay, output::PinOutput, pins::mapping::PinsMapping, rtc::Rtc,
+    rtc_memory::UTC_OFFSET,
 };
 
 pub struct RtcDisplayFastTrack {}
@@ -28,11 +29,18 @@ impl RtcDisplayFastTrack {
         unsafe { UTC_OFFSET.unwrap() }
     }
 
-    pub fn run_and_decompose<'a>(
-        config: HalConfig,
+    pub fn run_and_decompose<'a, TBacklightPin, PM>(
         i2c_proxy: I2cProxyAsync<I2cDriver<'a>>,
-    ) -> FastTrackResult<'a> {
-        let _ = PinOutput::create(config.backlight, true);
+        pins_mapping: &mut PM,
+    ) -> FastTrackResult<'a>
+    where
+        TBacklightPin: OutputPin,
+        PM: PinsMapping<TBacklightPin = TBacklightPin>,
+    {
+        let backlight_pin = pins_mapping.get_backlight_pin();
+        let backlight_pin_index = backlight_pin.pin();
+
+        let _ = PinOutput::create(backlight_pin_index, true);
 
         let mut rtc = Rtc::create(i2c_proxy);
         let mut display = ClockDisplay::create();
