@@ -1,18 +1,18 @@
 use blinky_shared::display_interface::{ClockDisplayInterface, LayerType, RenderMode};
 use display_interface_spi::SPIInterface;
 use embedded_graphics::pixelcolor::{Rgb565, RgbColor};
-use embedded_graphics::prelude::{DrawTarget, *};
+use embedded_graphics::prelude::*;
 use embedded_graphics::primitives::Rectangle;
 use embedded_graphics_framebuf::FrameBuf;
 use enumflags2::BitFlags;
 use esp_idf_hal::delay::Ets;
-use esp_idf_hal::gpio::{AnyIOPin, Gpio13, Gpio14, Gpio15, Gpio19, Gpio27, InputOutput, PinDriver};
-use esp_idf_hal::spi;
+use esp_idf_hal::gpio::{AnyIOPin, Gpio13, Gpio14, Gpio15, Gpio19, Gpio27, PinDriver};
+use esp_idf_hal::peripheral::Peripheral;
 use esp_idf_hal::spi::config::DriverConfig;
+use esp_idf_hal::spi::{self, SpiAnyPins};
 use esp_idf_hal::spi::{Dma, SpiDeviceDriver, SpiDriver, SpiSingleDeviceDriver, SPI2};
 use esp_idf_hal::units::FromValueType;
 use log::info;
-use mipidsi::models::Model;
 use mipidsi::options::{ColorInversion, ColorOrder};
 use mipidsi::{Builder, Display};
 use std::convert::Infallible;
@@ -22,37 +22,48 @@ use time::Instant;
 
 use crate::peripherals::GC9A01_NOINIT::Gc9a01Noinit;
 
-pub type EspSpi1InterfaceNoCS<'d> =
-    SPIInterface<SpiSingleDeviceDriver<'d>, PinDriver<'d, Gpio19, InputOutput>>;
-pub type DisplaySPI2<'d> =
-    Display<EspSpi1InterfaceNoCS<'d>, Gc9a01Noinit, PinDriver<'d, Gpio27, InputOutput>>;
+use super::pins::mapping::PinsMapping;
 
-pub struct ClockDisplay<'a> {
-    display: DisplaySPI2<'a>,
+pub type EspSpi1InterfaceNoCS<'d, DC: embedded_hal::digital::OutputPin> =
+    SPIInterface<SpiSingleDeviceDriver<'d>, DC>;
+
+pub type DisplaySPI2<
+    'd,
+    DC: embedded_hal::digital::OutputPin,
+    RST: embedded_hal::digital::OutputPin,
+> = Display<EspSpi1InterfaceNoCS<'d, DC>, Gc9a01Noinit, RST>;
+
+pub struct ClockDisplay<'a, DC, RST>
+where
+    DC: embedded_hal::digital::OutputPin,
+    RST: embedded_hal::digital::OutputPin,
+{
+    display: DisplaySPI2<'a, DC, RST>,
     buffer_base: Box<[Rgb565]>,
     buffer_layers: Vec<Box<[Rgb565]>>,
     static_rendered: bool,
     is_first_render: bool,
 }
 
-impl<'a> ClockDisplayInterface for ClockDisplay<'a> {
-    type Error = Infallible;
-    type ColorModel = Rgb565;
-    type FrameBuffer<'b> =
-        FrameBuf<Self::ColorModel, &'b mut [Self::ColorModel; ClockDisplay::FRAME_BUFFER_SIZE]>;
+const FRAME_BUFFER_SIDE: usize = 240;
+const FRAME_BUFFER_SIZE: usize = FRAME_BUFFER_SIDE * FRAME_BUFFER_SIDE;
 
-    const FRAME_BUFFER_SIDE: usize = 240;
-
-    const FRAME_BUFFER_SIZE: usize = Self::FRAME_BUFFER_SIDE * Self::FRAME_BUFFER_SIDE;
-
-    fn create() -> Self {
+impl<'a, DC, RST> ClockDisplay<'a, DC, RST>
+where
+    DC: embedded_hal::digital::OutputPin,
+    RST: embedded_hal::digital::OutputPin,
+{
+    pub fn create_hal<SPI, PM>(spi: impl Peripheral<P = SPI> + 'a, pins_mapping: &mut PM) -> Self
+    where
+        SPI: SpiAnyPins,
+        PM: PinsMapping<TSpiDC = DC, TDisplayRst = RST>,
+    {
         let mut delay = Ets;
-        let spi = unsafe { SPI2::new() };
-        let cs = unsafe { Gpio15::new() };
-        let sclk = unsafe { Gpio14::new() };
-        let sdo = unsafe { Gpio13::new() };
-        let rst = PinDriver::input_output_od(unsafe { Gpio27::new() }).unwrap();
-        let dc = PinDriver::input_output_od(unsafe { Gpio19::new() }).unwrap();
+        let cs = pins_mapping.get_spi_cs_pin();
+        let sclk = pins_mapping.get_spi_sclk_pin();
+        let sdo = pins_mapping.get_spi_sdo_pin();
+        let rst = pins_mapping.get_display_rst_pin();
+        let dc = pins_mapping.get_spi_dc_pin();
 
         let config = DriverConfig {
             dma: Dma::Disabled,
@@ -101,6 +112,21 @@ impl<'a> ClockDisplayInterface for ClockDisplay<'a> {
 
         res
     }
+}
+
+impl<'a, DC, RST> ClockDisplayInterface for ClockDisplay<'a, DC, RST>
+where
+    DC: embedded_hal::digital::OutputPin,
+    RST: embedded_hal::digital::OutputPin,
+{
+    const FRAME_BUFFER_SIDE: usize = FRAME_BUFFER_SIDE;
+
+    type Error = Infallible;
+    type ColorModel = Rgb565;
+    type FrameBuffer<'b> =
+        FrameBuf<Self::ColorModel, &'b mut [Self::ColorModel; FRAME_BUFFER_SIZE]>;
+
+    const FRAME_BUFFER_SIZE: usize = FRAME_BUFFER_SIZE;
 
     fn render<'c, 'd: 'c>(
         &'d mut self,
@@ -116,14 +142,9 @@ impl<'a> ClockDisplayInterface for ClockDisplay<'a> {
 
         let data = self.buffer_layers[layer_index].as_mut();
 
-        let buf: &'c mut [Self::ColorModel; ClockDisplay::FRAME_BUFFER_SIZE] =
-            data.try_into().unwrap();
+        let buf: &'c mut [Self::ColorModel; FRAME_BUFFER_SIZE] = data.try_into().unwrap();
 
-        let mut frame = FrameBuf::new(
-            buf,
-            ClockDisplay::FRAME_BUFFER_SIDE,
-            ClockDisplay::FRAME_BUFFER_SIDE,
-        );
+        let mut frame = FrameBuf::new(buf, FRAME_BUFFER_SIDE, FRAME_BUFFER_SIDE);
 
         let now = Instant::now();
 
@@ -216,7 +237,11 @@ impl<'a> ClockDisplayInterface for ClockDisplay<'a> {
     }
 }
 
-impl<'a> Drop for ClockDisplay<'a> {
+impl<'a, DC, RST> ClockDisplay<'a, DC, RST>
+where
+    DC: embedded_hal::digital::OutputPin,
+    RST: embedded_hal::digital::OutputPin,
+{
     fn drop(&mut self) {
         let mut delay = Ets;
 
@@ -226,9 +251,13 @@ impl<'a> Drop for ClockDisplay<'a> {
     }
 }
 
-impl<'a> ClockDisplay<'a> {
+impl<'a, DC, RST> ClockDisplay<'a, DC, RST>
+where
+    DC: embedded_hal::digital::OutputPin,
+    RST: embedded_hal::digital::OutputPin,
+{
     fn prepare_frame_buf<TColor: RgbColor + Debug>() -> Box<[TColor]> {
-        let mut v = Vec::<TColor>::with_capacity(ClockDisplay::FRAME_BUFFER_SIZE);
+        let mut v = Vec::<TColor>::with_capacity(FRAME_BUFFER_SIZE);
         for _ in 0..v.capacity() {
             v.push_within_capacity(TColor::BLACK).unwrap();
         }

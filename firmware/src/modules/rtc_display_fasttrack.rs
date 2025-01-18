@@ -1,9 +1,12 @@
+use std::convert::Infallible;
+
 use blinky_shared::{
     display_interface::{ClockDisplayInterface, LayerType, RenderMode},
     fasttrack::FastTrackRtcData,
     modules::renderer::{Renderer, TimeViewModel},
 };
-use esp_idf_hal::{gpio::OutputPin, i2c::I2cDriver};
+use embedded_graphics::pixelcolor::Rgb565;
+use esp_idf_hal::{gpio::OutputPin, i2c::I2cDriver, peripheral::Peripheral, spi::SpiAnyPins};
 use peripherals::i2c_proxy_async::I2cProxyAsync;
 use time::UtcOffset;
 
@@ -14,9 +17,12 @@ use crate::peripherals::{
 
 pub struct RtcDisplayFastTrack {}
 
-pub struct FastTrackResult<'a> {
+pub struct FastTrackResult<'a, TDisplay>
+where
+    TDisplay: ClockDisplayInterface<Error = Infallible, ColorModel = Rgb565>,
+{
     pub rtc: Rtc<'a>,
-    pub display: ClockDisplay<'a>,
+    pub display: TDisplay,
     pub rtc_data: FastTrackRtcData,
 }
 
@@ -29,13 +35,17 @@ impl RtcDisplayFastTrack {
         unsafe { UTC_OFFSET.unwrap() }
     }
 
-    pub fn run_and_decompose<'a, TBacklightPin, PM>(
+    pub fn run_and_decompose<'a, TSpi, TBacklightPin, TSpiDC, TSpiRst, PM>(
+        spi: impl Peripheral<P = TSpi> + 'static,
         i2c_proxy: I2cProxyAsync<I2cDriver<'a>>,
         pins_mapping: &mut PM,
-    ) -> FastTrackResult<'a>
+    ) -> FastTrackResult<'a, ClockDisplay<'a, TSpiDC, TSpiRst>>
     where
+        TSpi: SpiAnyPins,
         TBacklightPin: OutputPin,
-        PM: PinsMapping<TBacklightPin = TBacklightPin>,
+        TSpiDC: embedded_hal::digital::OutputPin + Send + 'static,
+        TSpiRst: embedded_hal::digital::OutputPin + Send + 'static,
+        PM: PinsMapping<TBacklightPin = TBacklightPin, TSpiDC = TSpiDC, TDisplayRst = TSpiRst>,
     {
         let backlight_pin = pins_mapping.get_backlight_pin();
         let backlight_pin_index = backlight_pin.pin();
@@ -43,7 +53,7 @@ impl RtcDisplayFastTrack {
         let _ = PinOutput::create(backlight_pin_index, true);
 
         let mut rtc = Rtc::create(i2c_proxy);
-        let mut display = ClockDisplay::create();
+        let mut display = ClockDisplay::<'_, TSpiDC, TSpiRst>::create_hal(spi, pins_mapping);
 
         let alarm_status = rtc.get_alarm_status();
 
@@ -67,7 +77,10 @@ impl RtcDisplayFastTrack {
         };
 
         display.render(LayerType::Clock, RenderMode::Ammend, |mut frame| {
-            Renderer::<ClockDisplay>::render_datetime(&mut frame, &time_view_model);
+            Renderer::<ClockDisplay<'_, TSpiDC, TSpiRst>>::render_datetime(
+                &mut frame,
+                &time_view_model,
+            );
 
             frame
         });

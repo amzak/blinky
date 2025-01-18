@@ -13,6 +13,7 @@ use blinky_shared::modules::calendar_module::CalendarModule;
 use blinky_shared::modules::reference_time::ReferenceTime;
 use blinky_shared::modules::renderer::Renderer;
 use blinky_shared::persistence::PersistenceUnitKind;
+use embedded_hal::digital::OutputPin;
 use esp_idf_hal::peripherals::Peripherals;
 use esp_idf_svc::log::{set_target_level, EspLogger};
 use log::*;
@@ -100,15 +101,18 @@ async fn main_async() -> Result<(), Box<dyn std::error::Error>> {
     let wait_for_first_render_task = mb.wait_for(Events::FirstRender);
 
     let i2c_proxy = hal.get_i2c_proxy_async().clone();
-    let fasttrack_result = RtcDisplayFastTrack::run_and_decompose(i2c_proxy, &mut pins_mapping);
+
+    let spi = peripherals.spi2;
+    let fasttrack_result =
+        RtcDisplayFastTrack::run_and_decompose(spi, i2c_proxy, &mut pins_mapping);
 
     let rtc_task = start_rtc(&message_bus, fasttrack_result.rtc);
 
-    let renderer_task = start_renderer(
-        &message_bus,
-        fasttrack_result.display,
-        fasttrack_result.rtc_data,
-    );
+    let mb = message_bus.clone();
+    let renderer_task =
+        Renderer::<_>::start(mb, fasttrack_result.display, fasttrack_result.rtc_data);
+
+    //let renderer_task = start_renderer_(&message_bus, fasttrack_result);
 
     let tasks_batch: Vec<Pin<Box<dyn futures::Future<Output = ()>>>> = vec![
         Box::pin(logging_task),
@@ -196,11 +200,11 @@ fn start_rtc(mb: &MessageBus, rtc: Rtc<'static>) -> impl Future<Output = ()> {
     RtcModule::start(rtc, mb)
 }
 
-fn start_renderer(
-    mb: &MessageBus,
-    display: ClockDisplay<'static>,
-    rtc_data: FastTrackRtcData,
-) -> impl Future<Output = ()> {
-    let mb = mb.clone();
-    Renderer::<ClockDisplay>::start(mb, display, rtc_data)
-}
+// fn start_renderer(
+//     mb: &MessageBus,
+//     display: ClockDisplay<'static, DC, RST>,
+//     rtc_data: FastTrackRtcData,
+// ) -> impl Future<Output = ()> {
+//     let mb = mb.clone();
+//     Renderer::<_>::start(mb, display, rtc_data)
+// }

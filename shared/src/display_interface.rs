@@ -34,7 +34,7 @@ pub trait ClockDisplayInterface {
     const FRAME_BUFFER_SIDE: usize;
     const FRAME_BUFFER_SIZE: usize;
 
-    fn create() -> Self;
+    //fn create<SPI, PM>(spi: SPI, pins_mapping: &mut PM) -> Self;
 
     fn render<'b, 'a: 'b>(
         &'a mut self,
