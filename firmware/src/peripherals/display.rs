@@ -1,20 +1,21 @@
 use blinky_shared::display_interface::{ClockDisplayInterface, LayerType, RenderMode};
-use display_interface_spi::SPIInterface;
 use embedded_graphics::pixelcolor::{Rgb565, RgbColor};
 use embedded_graphics::prelude::*;
 use embedded_graphics::primitives::Rectangle;
 use embedded_graphics_framebuf::FrameBuf;
 use enumflags2::BitFlags;
 use esp_idf_hal::delay::Ets;
-use esp_idf_hal::gpio::{AnyIOPin, Gpio13, Gpio14, Gpio15, Gpio19, Gpio27, PinDriver};
+use esp_idf_hal::gpio::AnyIOPin;
 use esp_idf_hal::peripheral::Peripheral;
 use esp_idf_hal::spi::config::DriverConfig;
 use esp_idf_hal::spi::{self, SpiAnyPins};
-use esp_idf_hal::spi::{Dma, SpiDeviceDriver, SpiDriver, SpiSingleDeviceDriver, SPI2};
+use esp_idf_hal::spi::{Dma, SpiDeviceDriver, SpiDriver, SpiSingleDeviceDriver};
 use esp_idf_hal::units::FromValueType;
 use log::info;
+use mipidsi::interface::SpiInterface;
 use mipidsi::options::{ColorInversion, ColorOrder};
 use mipidsi::{Builder, Display};
+use static_cell::StaticCell;
 use std::convert::Infallible;
 use std::error::Error;
 use std::fmt::Debug;
@@ -24,21 +25,15 @@ use crate::peripherals::GC9A01_NOINIT::Gc9a01Noinit;
 
 use super::pins::mapping::PinsMapping;
 
-pub type EspSpi1InterfaceNoCS<'d, DC: embedded_hal::digital::OutputPin> =
-    SPIInterface<SpiSingleDeviceDriver<'d>, DC>;
-
-pub type DisplaySPI2<
-    'd,
-    DC: embedded_hal::digital::OutputPin,
-    RST: embedded_hal::digital::OutputPin,
-> = Display<EspSpi1InterfaceNoCS<'d, DC>, Gc9a01Noinit, RST>;
+pub type EspSpiInterfaceNoCS<'d, DC> = SpiInterface<'d, SpiSingleDeviceDriver<'d>, DC>;
+pub type DisplaySPI<'d, DC, RST> = Display<EspSpiInterfaceNoCS<'d, DC>, Gc9a01Noinit, RST>;
 
 pub struct ClockDisplay<'a, DC, RST>
 where
     DC: embedded_hal::digital::OutputPin,
     RST: embedded_hal::digital::OutputPin,
 {
-    display: DisplaySPI2<'a, DC, RST>,
+    display: DisplaySPI<'a, DC, RST>,
     buffer_base: Box<[Rgb565]>,
     buffer_layers: Vec<Box<[Rgb565]>>,
     static_rendered: bool,
@@ -47,6 +42,8 @@ where
 
 const FRAME_BUFFER_SIDE: usize = 240;
 const FRAME_BUFFER_SIZE: usize = FRAME_BUFFER_SIDE * FRAME_BUFFER_SIDE;
+
+static SPI_BUFFER: StaticCell<[u8; 512]> = StaticCell::new();
 
 impl<'a, DC, RST> ClockDisplay<'a, DC, RST>
 where
@@ -80,7 +77,9 @@ where
 
         let spi = SpiDeviceDriver::new(driver, Some(cs), &spi_config).unwrap();
 
-        let di = SPIInterface::new(spi, dc);
+        let buffer = SPI_BUFFER.init([0; 512]);
+
+        let di = SpiInterface::new(spi, dc, buffer);
 
         info!("initializing display spi...");
 
@@ -102,15 +101,13 @@ where
 
         info!("display buffers initialized");
 
-        let res = ClockDisplay {
+        ClockDisplay {
             display,
             buffer_layers,
             buffer_base: Self::prepare_frame_buf(),
             static_rendered: false,
             is_first_render: true,
-        };
-
-        res
+        }
     }
 }
 
