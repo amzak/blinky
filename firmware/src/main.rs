@@ -7,13 +7,11 @@
 
 use blinky_shared::commands::Commands;
 use blinky_shared::events::Events;
-use blinky_shared::fasttrack::FastTrackRtcData;
 use blinky_shared::message_bus::MessageBus;
 use blinky_shared::modules::calendar_module::CalendarModule;
 use blinky_shared::modules::reference_time::ReferenceTime;
 use blinky_shared::modules::renderer::Renderer;
 use blinky_shared::persistence::PersistenceUnitKind;
-use embedded_hal::digital::OutputPin;
 use esp_idf_hal::peripherals::Peripherals;
 use esp_idf_svc::log::{set_target_level, EspLogger};
 use log::*;
@@ -93,7 +91,9 @@ async fn main_async() -> Result<(), Box<dyn std::error::Error>> {
 
     let message_bus = MessageBus::new();
 
-    let hal: HAL = HAL::new(hal_conf.clone(), peripherals.i2c0);
+    let i2c = peripherals.i2c0;
+
+    let hal: HAL = HAL::new(hal_conf.clone(), i2c, &mut pins_mapping);
 
     let logging_task = start_logging(&message_bus);
 
@@ -103,6 +103,7 @@ async fn main_async() -> Result<(), Box<dyn std::error::Error>> {
     let i2c_proxy = hal.get_i2c_proxy_async().clone();
 
     let spi = peripherals.spi2;
+
     let fasttrack_result =
         RtcDisplayFastTrack::run_and_decompose(spi, i2c_proxy, &mut pins_mapping);
 

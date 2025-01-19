@@ -1,9 +1,11 @@
 use crate::peripherals::touchpad::TouchpadConfig;
-use esp_idf_hal::gpio::{Gpio25, Gpio26, IOPin};
+use esp_idf_hal::gpio::IOPin;
 use esp_idf_hal::i2c::{I2cConfig, I2cDriver, I2C0};
 use esp_idf_hal::units::FromValueType;
 use peripherals::i2c_management::I2cManagement;
 use peripherals::i2c_proxy_async::I2cProxyAsync;
+
+use super::pins::mapping::PinsMapping;
 
 pub struct HAL<'d> {
     i2c_manager: I2cManagement<'d>,
@@ -21,17 +23,21 @@ pub struct PinConfig {
 }
 
 impl<'d> HAL<'d> {
-    fn init_i2c(i2c: I2C0) -> I2cManagement<'d> {
-        let scl = unsafe { Gpio25::new() };
-        let sda = unsafe { Gpio26::new() };
-        let config = I2cConfig::new().baudrate(100.kHz().into());
+    pub fn new<TI2cScl, TI2cSda, PM>(config: HalConfig, i2c: I2C0, pins_mapping: &mut PM) -> HAL<'d>
+    where
+        TI2cScl: IOPin,
+        TI2cSda: IOPin,
+        PM: PinsMapping<TI2cScl = TI2cScl, TI2cSda = TI2cSda>,
+    {
+        let scl = pins_mapping.get_i2c_scl_pin();
+        let sda = pins_mapping.get_i2c_sda_pin();
+        let i2c_config = I2cConfig::new().baudrate(100.kHz().into());
 
-        I2cManagement::create(i2c, scl.downgrade(), sda.downgrade(), config)
-    }
+        let i2c_management =
+            I2cManagement::create(i2c, scl.downgrade(), sda.downgrade(), i2c_config);
 
-    pub fn new(config: HalConfig, peripherals: I2C0) -> HAL<'d> {
         Self {
-            i2c_manager: Self::init_i2c(peripherals),
+            i2c_manager: i2c_management,
             config,
         }
     }

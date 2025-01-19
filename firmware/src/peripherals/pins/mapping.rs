@@ -1,4 +1,4 @@
-use esp_idf_hal::gpio::{ADCPin, OutputPin, Pins};
+use esp_idf_hal::gpio::{ADCPin, IOPin, OutputPin, Pins};
 
 pub trait PinsMapping {
     type TAdcPin: ADCPin;
@@ -10,6 +10,9 @@ pub trait PinsMapping {
     type TSpiDC: embedded_hal::digital::OutputPin;
 
     type TDisplayRst: embedded_hal::digital::OutputPin;
+
+    type TI2cScl: IOPin;
+    type TI2cSda: IOPin;
 
     fn new(peripherals: Pins) -> Self;
 
@@ -26,4 +29,8 @@ pub trait PinsMapping {
     fn get_spi_dc_pin(&mut self) -> Self::TSpiDC;
 
     fn get_display_rst_pin(&mut self) -> Self::TDisplayRst;
+
+    fn get_i2c_scl_pin(&mut self) -> Self::TI2cScl;
+
+    fn get_i2c_sda_pin(&mut self) -> Self::TI2cSda;
 }
