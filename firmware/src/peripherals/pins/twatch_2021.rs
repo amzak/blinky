@@ -1,5 +1,5 @@
 use esp_idf_hal::gpio::{
-    Gpio13, Gpio14, Gpio15, Gpio19, Gpio21, Gpio25, Gpio26, Gpio27, Gpio36, PinDriver, Pins,
+    Gpio0, Gpio13, Gpio14, Gpio15, Gpio19, Gpio21, Gpio25, Gpio26, Gpio27, Gpio36, PinDriver, Pins,
 };
 
 use super::mapping::PinsMapping;
@@ -79,4 +79,12 @@ impl PinsMapping for TWatch2021Pins {
     fn get_i2c_sda_pin(&mut self) -> Self::TI2cSda {
         return self.i2c_sda_pin.take().unwrap();
     }
+
+    type TSpiSDO1 = Gpio0;
+
+    type TSpiSDO2 = Gpio0;
+
+    type TSpiSDO3 = Gpio0;
+
+    type TDisplayEn = Gpio0;
 }

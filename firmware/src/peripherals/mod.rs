@@ -1,4 +1,5 @@
 pub mod GC9A01_NOINIT;
+pub mod SH8601;
 pub mod accelerometer;
 pub mod adc;
 

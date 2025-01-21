@@ -6,9 +6,16 @@ pub trait PinsMapping {
 
     type TSpiCSPin: OutputPin;
     type TSpiSCLK: OutputPin;
+
     type TSpiSDO: OutputPin;
+
+    type TSpiSDO1: OutputPin;
+    type TSpiSDO2: OutputPin;
+    type TSpiSDO3: OutputPin;
+
     type TSpiDC: embedded_hal::digital::OutputPin;
 
+    type TDisplayEn: OutputPin;
     type TDisplayRst: embedded_hal::digital::OutputPin;
 
     type TI2cScl: IOPin;
