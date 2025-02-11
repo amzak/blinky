@@ -149,44 +149,6 @@ pub(crate) fn run(spi: esp_idf_hal::spi::SPI2, pins_mapping: &mut impl PinsMappi
     delay.delay_ms(200);
 
     init_display(&mut spi, &mut delay);
-
-    // let mut buffer = [0u8; 4];
-
-    // spi.transaction(&mut [
-    //     Operation::WriteWithWidth(&[0x03], spi::config::LineWidth::Single),
-    //     Operation::WriteWithWidth(&[0x00, 0x04, 0x00], spi::config::LineWidth::Single),
-    //     Operation::ReadWithWidth(&mut buffer, spi::config::LineWidth::Single),
-    // ])
-    // .unwrap();
-
-    // log::info!("received: {:02X?}", &buffer);
-
-    // spi.transaction(&mut [
-    //     Operation::WriteWithWidth(&[0x03], spi::config::LineWidth::Single),
-    //     Operation::WriteWithWidth(&[0x00, 0xda, 0x00], spi::config::LineWidth::Single),
-    //     Operation::ReadWithWidth(&mut buffer, spi::config::LineWidth::Single),
-    // ])
-    // .unwrap();
-
-    // log::info!("received: {:02X?}", &buffer);
-
-    // spi.transaction(&mut [
-    //     Operation::WriteWithWidth(&[0x03], spi::config::LineWidth::Single),
-    //     Operation::WriteWithWidth(&[0x00, 0x0a, 0x00], spi::config::LineWidth::Single),
-    //     Operation::ReadWithWidth(&mut buffer, spi::config::LineWidth::Single),
-    // ])
-    // .unwrap();
-
-    // log::info!("received: {:02X?}", &buffer);
-
-    // spi.transaction(&mut [
-    //     Operation::WriteWithWidth(&[0x03], spi::config::LineWidth::Single),
-    //     Operation::WriteWithWidth(&[0x00, 0xc4, 0x00], spi::config::LineWidth::Single),
-    //     Operation::ReadWithWidth(&mut buffer, spi::config::LineWidth::Single),
-    // ])
-    // .unwrap();
-
-    // log::info!("received: {:02X?}", &buffer);
 }
 
 fn command<'a>(spi: &mut SpiDeviceDriver<'a, SpiDriver<'a>>, cmd: SH8601Commands) {
@@ -226,73 +188,6 @@ fn init_display<'a, DELAY: embedded_hal::delay::DelayNs>(
 
     delay.delay_us(120_000);
 
-    // spi.transaction(&mut [
-    //     Operation::WriteWithWidth(
-    //         &[0x02, 0x00, SH8601Commands::SH8601_C_NORON as u8, 0x00],
-    //         spi::config::LineWidth::Single,
-    //     ),
-    //     Operation::WriteWithWidth(
-    //         &[0x02, 0x00, SH8601Commands::SH8601_C_INVOFF as u8, 0x00],
-    //         spi::config::LineWidth::Single,
-    //     ),
-    //     Operation::WriteWithWidth(
-    //         &[
-    //             0x02,
-    //             0x00,
-    //             SH8601Commands::SH8601_W_PIXFMT as u8,
-    //             0x00,
-    //             0x05,
-    //         ],
-    //         spi::config::LineWidth::Single,
-    //     ),
-    //     Operation::WriteWithWidth(
-    //         &[0x02, 0x00, SH8601Commands::SH8601_C_DISPON as u8, 0x00],
-    //         spi::config::LineWidth::Single,
-    //     ),
-    //     Operation::WriteWithWidth(
-    //         &[
-    //             0x02,
-    //             0x00,
-    //             SH8601Commands::SH8601_W_WCTRLD1 as u8,
-    //             0x00,
-    //             0x28,
-    //         ],
-    //         spi::config::LineWidth::Single,
-    //     ),
-    //     Operation::WriteWithWidth(
-    //         &[
-    //             0x02,
-    //             0x00,
-    //             SH8601Commands::SH8601_W_WDBRIGHTNESSVALNOR as u8,
-    //             0x00,
-    //             0x00,
-    //         ],
-    //         spi::config::LineWidth::Single,
-    //     ),
-    //     Operation::WriteWithWidth(
-    //         &[0x02, 0x00, SH8601Commands::SH8601_W_WCE as u8, 0x00, 0x00],
-    //         spi::config::LineWidth::Single,
-    //     ),
-    //     Operation::WriteWithWidth(
-    //         &[
-    //             0x02,
-    //             0x00,
-    //             SH8601Commands::SH8601_W_WDBRIGHTNESSVALNOR as u8,
-    //             0x00,
-    //             0x55,
-    //         ],
-    //         spi::config::LineWidth::Single,
-    //     ),
-    // ])
-    // .unwrap();
-
-    // delay.delay_us(120_000);
-
-    //command_wd(spi, SH8601Commands::SH8601_W_SPIMODECTL, &[0x00]);
-
-    // command_wd(spi, SH8601Commands::SH8601_W_SETTSL, &[0x01, 0xD1]);
-    // command_wd(spi, SH8601Commands::SH8601_WC_TEARON, &[0x00]);
-
     command(spi, SH8601Commands::SH8601_C_NORON);
     //command(spi, SH8601Commands::SH8601_C_INVOFF);
 
@@ -327,21 +222,7 @@ fn init_display<'a, DELAY: embedded_hal::delay::DelayNs>(
 
     delay.delay_us(100_000);
 
-    // command(spi, SH8601Commands::SH8601_C_NORON);
-    // command(spi, SH8601Commands::SH8601_C_ALLPOFF);
-
-    // delay.delay_ms(1000);
-
-    // command(spi, SH8601Commands::SH8601_C_ALLPON);
-
-    // delay.delay_ms(1000);
-
-    // command(spi, SH8601Commands::SH8601_C_NORON);
-
     command_wd(spi, SH8601Commands::SH8601_W_WDBRIGHTNESSVALNOR, &[0x55]);
-
-    // command(spi, SH8601Commands::SH8601_C_DISPON);
-    // delay.delay_us(120_000);
 
     const width: usize = 480;
     const height: usize = 480;
@@ -380,5 +261,3 @@ fn init_display<'a, DELAY: embedded_hal::delay::DelayNs>(
 
     delay.delay_ms(10000);
 }
-
-fn write_window(xy: (u16, u16), wh: (u16, u16)) {}
