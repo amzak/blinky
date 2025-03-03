@@ -9,10 +9,13 @@ use blinky_shared::display_interface::ClockDisplayInterface;
 use blinky_shared::events::Events;
 use blinky_shared::fasttrack::FastTrackRtcData;
 use blinky_shared::message_bus::MessageBus;
+use blinky_shared::modules::fonts_set::FontSet466;
+use blinky_shared::modules::icon_set_466::IconsSet466;
 use blinky_shared::{commands::Commands, modules::renderer::Renderer};
 use display::SimDisplay;
 use env_logger::{Builder, Target};
 use log::{info, LevelFilter};
+use time::macros::datetime;
 use time::{OffsetDateTime, Time, UtcOffset};
 use tokio::join;
 use tokio::time::{sleep, Duration};
@@ -49,7 +52,11 @@ async fn main_async() -> Result<(), Box<dyn std::error::Error>> {
         now: None,
     };
 
-    let renderer_task = Renderer::<SimDisplay>::start(message_bus_clone, display, rtc_data);
+    let renderer_task = Renderer::<SimDisplay, FontSet466, IconsSet466>::start(
+        message_bus_clone,
+        display,
+        rtc_data,
+    );
 
     let message_bus_clone = message_bus.clone();
     tokio::task::spawn_blocking(move || {
@@ -61,7 +68,7 @@ async fn main_async() -> Result<(), Box<dyn std::error::Error>> {
     let startup_sequence = async move {
         sleep(Duration::from_millis(1000)).await;
 
-        let now_utc = OffsetDateTime::now_utc();
+        let now_utc = datetime!(2000-01-01 12:59:59.5 UTC);
         let date = now_utc.date();
 
         let mut now = OffsetDateTime::new_in_offset(
@@ -72,47 +79,61 @@ async fn main_async() -> Result<(), Box<dyn std::error::Error>> {
 
         let event_start_time = OffsetDateTime::new_utc(date, Time::MIDNIGHT)
             + Duration::from_hours(12)
+            + Duration::from_hours(1)
             + Duration::from_secs(5);
-
-        let duration = Duration::from_hours(2);
 
         message_bus.send_event(Events::TimeNow(now));
         message_bus.send_cmd(Commands::ResumeRendering);
         message_bus.send_event(Events::BatteryLevel(80));
         message_bus.send_event(Events::BleClientConnected);
-        message_bus.send_event(Events::Temperature(20.0));
+        message_bus.send_event(Events::Temperature(20));
 
         message_bus.send_event(Events::CalendarEvent(CalendarEvent {
             id: 0,
             kind: CalendarKind::Phone,
-            start: event_start_time,
-            end: event_start_time + duration,
-            title: "qqq".to_string(),
+            start: now + Duration::from_secs(10),
+            end: now + Duration::from_hours(1),
+            title: "qqq1".to_string(),
             description: "some description".to_string(),
             icon: blinky_shared::calendar::CalendarEventIcon::Rain,
-            color: 0,
+            color: 255,
+            lane: 1,
         }));
 
         message_bus.send_event(Events::CalendarEvent(CalendarEvent {
             id: 1,
             kind: CalendarKind::Phone,
-            start: now,
-            end: now + Duration::from_days(1),
-            title: "all day".to_string(),
-            description: "".to_string(),
-            icon: blinky_shared::calendar::CalendarEventIcon::Default,
+            start: now + Duration::from_hours(3),
+            end: now + Duration::from_hours(5),
+            title: "qqq1".to_string(),
+            description: "some description".to_string(),
+            icon: blinky_shared::calendar::CalendarEventIcon::Rain,
             color: 0,
+            lane: 1,
+        }));
+
+        message_bus.send_event(Events::CalendarEvent(CalendarEvent {
+            id: 2,
+            kind: CalendarKind::Phone,
+            start: now + Duration::from_hours(3),
+            end: now + Duration::from_hours(5),
+            title: "qqq2".to_string(),
+            description: "some description".to_string(),
+            icon: blinky_shared::calendar::CalendarEventIcon::CalendarAlert,
+            color: 0,
+            lane: 2,
         }));
 
         let sample_event = CalendarEvent {
-            id: 2,
+            id: 4,
             kind: CalendarKind::Phone,
             start: event_start_time + Duration::from_mins(6),
-            end: event_start_time + Duration::from_mins(60),
-            title: "qqq".to_string(),
+            end: event_start_time + Duration::from_hours(11),
+            title: "qqq3".to_string(),
             description: "description".to_string(),
             icon: blinky_shared::calendar::CalendarEventIcon::Car,
             color: 0,
+            lane: 0,
         };
 
         message_bus.send_event(Events::CalendarEvent(sample_event.clone()));

@@ -14,6 +14,9 @@ pub struct TWatch2021Pins {
     display_rst_pin: Option<<Self as PinsMapping>::TDisplayRst>,
     i2c_scl_pin: Option<<Self as PinsMapping>::TI2cScl>,
     i2c_sda_pin: Option<<Self as PinsMapping>::TI2cSda>,
+
+    touch_int: Option<<Self as PinsMapping>::TTouchInterrupt>,
+    button1: Option<<Self as PinsMapping>::TButton1>,
 }
 
 impl PinsMapping for TWatch2021Pins {
@@ -29,6 +32,9 @@ impl PinsMapping for TWatch2021Pins {
 
     type TI2cScl = Gpio25;
     type TI2cSda = Gpio26;
+
+    type TTouchInterrupt = Gpio32;
+    type TButton1 = Gpio34;
 
     fn new(peripherals: Pins) -> TWatch2021Pins {
         TWatch2021Pins {
@@ -82,9 +88,9 @@ impl PinsMapping for TWatch2021Pins {
 
     type TSpiSDO1 = Gpio0;
 
-    type TSpiSDO2 = Gpio0;
+    type TSpiSDO2 = NotUsedPin;
 
-    type TSpiSDO3 = Gpio0;
+    type TSpiSDO3 = NotUsedPin;
 
     type TDisplayEn = Gpio0;
 }

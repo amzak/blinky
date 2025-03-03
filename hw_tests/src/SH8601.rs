@@ -100,10 +100,16 @@ pub enum SH8601Commands {
     SH8601_R_RDID3 = 0xDC, // Read ID3
 }
 
+impl SH8601 {
+    pub fn new() -> Self {
+        SH8601 {}
+    }
+}
+
 impl Model for SH8601 {
     type ColorFormat = Rgb565;
 
-    const FRAMEBUFFER_SIZE: (u16, u16) = (480, 480);
+    const FRAMEBUFFER_SIZE: (u16, u16) = (466, 466);
 
     fn init<DELAY, DI>(
         &mut self,
@@ -115,23 +121,22 @@ impl Model for SH8601 {
         DELAY: embedded_hal::delay::DelayNs,
         DI: mipidsi::interface::Interface,
     {
-        let madctl = SetAddressMode::from(options);
+        delay.delay_us(120_000);
 
-        di.write_command(ExitSleepMode)?;
+        di.write_raw(SH8601Commands::SH8601_C_SLPOUT as u8, &[])?;
 
         delay.delay_us(120_000);
 
-        di.write_command(EnterNormalMode)?;
+        di.write_raw(SH8601Commands::SH8601_C_NORON as u8, &[])?;
 
-        di.write_command(madctl)?;
+        //let pf = PixelFormat::with_all(BitsPerPixel::from_rgb_color::<Self::ColorFormat>());
+        //di.write_command(SetPixelFormat::new(pf))?;
+        di.write_raw(SH8601Commands::SH8601_W_PIXFMT as u8, &[0x05])?;
 
-        di.write_command(SetInvertMode::new(options.invert_colors))?;
+        let madctl = SetAddressMode::from(options);
+        // di.write_command(madctl)?;
 
-        let pf = PixelFormat::with_all(BitsPerPixel::from_rgb_color::<Self::ColorFormat>());
-
-        di.write_command(SetPixelFormat::new(pf))?;
-
-        di.write_command(SetDisplayOn)?;
+        di.write_raw(SH8601Commands::SH8601_C_DISPON as u8, &[])?;
 
         di.write_raw(SH8601Commands::SH8601_W_WCTRLD1 as u8, &[0x28])?;
 
@@ -139,7 +144,11 @@ impl Model for SH8601 {
 
         di.write_raw(SH8601Commands::SH8601_W_WCE as u8, &[0x00])?;
 
-        delay.delay_us(10_000);
+        di.write_raw(SH8601Commands::SH8601_C_INVOFF as u8, &[])?;
+
+        delay.delay_us(100_000);
+
+        di.write_raw(SH8601Commands::SH8601_W_WDBRIGHTNESSVALNOR as u8, &[0x55])?;
 
         Ok(madctl)
     }

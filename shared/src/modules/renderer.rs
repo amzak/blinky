@@ -1,10 +1,10 @@
 use embedded_graphics::image::Image;
-use embedded_graphics::mono_font::ascii::FONT_6X10;
 use embedded_graphics::pixelcolor::raw::RawU16;
-use embedded_graphics::pixelcolor::{Rgb555, Rgb565};
+use embedded_graphics::pixelcolor::Rgb555;
 use embedded_graphics::text::renderer::CharacterStyle;
 use embedded_graphics::text::Text;
 use embedded_graphics_framebuf::FrameBuf;
+use embedded_icon::mdi::size24px;
 use enumflags2::BitFlags;
 use time::{Duration, OffsetDateTime};
 
@@ -16,6 +16,7 @@ use embedded_icon::mdi::size12px::{self};
 use embedded_icon::prelude::*;
 use tinytga::Tga;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
+use u8g2_fonts::U8g2TextStyle;
 
 use crate::calendar::{self, CalendarEvent, CalendarEventKey};
 use crate::calendar::{CalendarEventIcon, TimelyDataRecord};
@@ -25,21 +26,25 @@ use crate::events::Events;
 use crate::fasttrack::FastTrackRtcData;
 use crate::message_bus::{BusHandler, BusSender, MessageBus};
 use embedded_graphics::primitives::{PrimitiveStyle, StyledDrawable};
-use embedded_graphics::{mono_font::MonoTextStyle, prelude::*, primitives};
+use embedded_graphics::{prelude::*, primitives};
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::f32::consts::PI;
 use std::marker::PhantomData;
 use std::sync::Arc;
-use u8g2_fonts::{fonts, U8g2TextStyle};
 
+use super::fonts_set::FontSet;
 use super::graphics::Graphics;
+use super::icon_set::IconSet;
+use super::relative::{RelativeCoordinate, RelativeSize};
 use super::renderer_icons::render_battery_level_icon;
 use super::renderer_icons::render_event_icon;
 
 pub const HALF_DAY: Duration = Duration::hours(12);
 
-pub struct Renderer<TDisplay> {
+pub struct Renderer<TDisplay, TFontSet: FontSet, TIconSet: IconSet> {
     _inner: PhantomData<TDisplay>,
+    _font_set: PhantomData<TFontSet>,
+    _icon_set: PhantomData<TIconSet>,
 }
 
 struct Context {
@@ -47,11 +52,13 @@ struct Context {
     pause: bool,
 }
 
+#[derive(Debug)]
 enum VisualMode {
     Normal,
     Details,
 }
 
+#[derive(Debug)]
 struct ViewModel {
     is_past_first_frame: bool,
     is_charging: Option<bool>,
@@ -71,41 +78,44 @@ struct ViewModel {
     gesture: u8,
 }
 
+#[derive(Debug)]
 pub struct TimeViewModel {
     pub time: Option<OffsetDateTime>,
 }
 
 struct EventTagStyle<TColor> {
     icon: CalendarEventIcon,
-    event_tag_size: u8,
+    event_tag_size: RelativeSize,
     color: TColor,
-    length: u8,
-    thickness: u8,
+    length: RelativeSize,
+    thickness: RelativeSize,
 }
 
 impl<TColor> EventTagStyle<TColor> {
     fn default(icon: CalendarEventIcon, color: TColor) -> Self {
         Self {
             color,
-            event_tag_size: 16,
+            event_tag_size: 67u16.into(), //16,
             icon,
-            length: 25,
-            thickness: 1,
+            length: 105u16.into(),  //25,
+            thickness: 4u16.into(), //1
         }
     }
 
     fn large(icon: CalendarEventIcon, color: TColor) -> Self {
         Self {
             color,
-            event_tag_size: 25,
+            event_tag_size: 105u16.into(), //25,
             icon,
-            length: 60,
-            thickness: 1,
+            length: 252u16.into(),  //60,
+            thickness: 4u16.into(), //1
         }
     }
 }
 
-impl<TDisplay> BusHandler<Context> for Renderer<TDisplay> {
+impl<TDisplay, TFontSet: FontSet, TIconSet: IconSet> BusHandler<Context>
+    for Renderer<TDisplay, TFontSet, TIconSet>
+{
     async fn event_handler(_bus: &BusSender, context: &mut Context, event: Events) {
         if context.pause && matches!(event, Events::TimeNow(_)) {
             return;
@@ -115,6 +125,7 @@ impl<TDisplay> BusHandler<Context> for Renderer<TDisplay> {
             return;
         }
 
+        info!("sending event {:?} to render loop", event);
         context.tx.send(event).await.unwrap();
     }
 
@@ -134,7 +145,7 @@ impl<TDisplay> BusHandler<Context> for Renderer<TDisplay> {
     }
 }
 
-impl<TDisplay> Renderer<TDisplay> {
+impl<TDisplay, TFontSet: FontSet, TIconSet: IconSet> Renderer<TDisplay, TFontSet, TIconSet> {
     fn is_renderable(event: &Events) -> bool {
         match event {
             Events::TimeNow(_)
@@ -158,9 +169,11 @@ impl<TDisplay> Renderer<TDisplay> {
     }
 }
 
-impl<TDisplay> Renderer<TDisplay>
+impl<TDisplay, TFontSet, TIconSet> Renderer<TDisplay, TFontSet, TIconSet>
 where
     TDisplay: ClockDisplayInterface + 'static + Send,
+    TFontSet: FontSet,
+    TIconSet: IconSet,
 {
     pub async fn start(bus: MessageBus, display: TDisplay, rtc_data: FastTrackRtcData) {
         info!("starting...");
@@ -188,68 +201,10 @@ where
             return;
         }
 
+        info!("rendering datetime {:?}", vm.time);
+
         let bounds = Self::render_time(frame, vm);
         Self::render_day(frame, vm, &bounds);
-    }
-
-    fn render_clock_face(
-        frame: &mut <TDisplay as ClockDisplayInterface>::FrameBuffer<'_>,
-        vm: &mut ViewModel,
-    ) {
-        let width = 40;
-        let half_width = width / 2;
-        let value: RawU16 = Rgb565::CSS_DARK_SLATE_GRAY.into();
-        let style = PrimitiveStyle::with_stroke(TDisplay::ColorModel::from(value), width);
-        let top_left = Point::new(half_width as i32, half_width as i32);
-
-        Graphics::<TDisplay>::circle(
-            frame,
-            top_left,
-            TDisplay::FRAME_BUFFER_SIDE as u32 - top_left.x as u32 * 2,
-            style,
-        );
-
-        let top_left = Point::new(width as i32, width as i32);
-
-        let width = 5;
-
-        let value: RawU16 = Rgb565::CSS_LIGHT_SLATE_GRAY.into();
-        let style = PrimitiveStyle::with_stroke(TDisplay::ColorModel::from(value), width);
-
-        Graphics::<TDisplay>::circle(
-            frame,
-            top_left,
-            TDisplay::FRAME_BUFFER_SIDE as u32 - top_left.x as u32 * 2,
-            style,
-        );
-
-        // let top_left = Point::new(2, 2);
-
-        // let style = PrimitiveStyle::with_stroke(TDisplay::ColorModel::YELLOW, 2);
-
-        // let quater = Angle::from_degrees(90.0);
-
-        // primitives::Arc::new(
-        //     top_left,
-        //     TDisplay::FRAME_BUFFER_SIDE as u32 - top_left.x as u32 * 2,
-        //     Angle::from_radians(2.0 * std::f32::consts::PI * 5.0 / (60.0 * 12.0)) - quater,
-        //     Angle::from_radians(2.0 * std::f32::consts::PI * 10.0 / (60.0 * 12.0)),
-        // )
-        // .into_styled(style)
-        // .draw(frame)
-        // .unwrap();
-
-        // let style = PrimitiveStyle::with_stroke(TDisplay::ColorModel::RED, 2);
-
-        // primitives::Arc::new(
-        //     top_left,
-        //     TDisplay::FRAME_BUFFER_SIDE as u32 - top_left.x as u32 * 2,
-        //     Angle::zero() - quater,
-        //     Angle::from_radians(2.0 * std::f32::consts::PI * 5.0 / (60.0 * 12.0)),
-        // )
-        // .into_styled(style)
-        // .draw(frame)
-        // .unwrap();
     }
 
     fn render_clock_face_marks(
@@ -302,26 +257,23 @@ where
         let time_template = format_description!(version = 2, "[hour repr:24]:[minute]:[second]");
 
         let time_text_style =
-            U8g2TextStyle::new(fonts::u8g2_font_spleen16x32_mn, TDisplay::ColorModel::WHITE);
+            U8g2TextStyle::new(TFontSet::get_clock_font(), TDisplay::ColorModel::WHITE);
 
         let time_as_text = vm.time.unwrap().format(&time_template).unwrap();
 
-        let position = Self::get_zero_point();
+        let position = Self::get_center_point();
 
         Graphics::<TDisplay>::text_aligned(
             frame,
             &time_as_text,
-            position,
+            position.to_absolute(TDisplay::FRAME_BUFFER_SIDE),
             time_text_style,
             embedded_graphics::text::Alignment::Center,
         )
     }
 
-    fn get_zero_point() -> Point {
-        Point::new(
-            TDisplay::FRAME_BUFFER_SIDE as i32 / 2,
-            TDisplay::FRAME_BUFFER_SIDE as i32 / 2,
-        )
+    fn get_center_point() -> RelativeCoordinate {
+        (1000 / 2, 1000 / 2).into()
     }
 
     fn render_day(
@@ -331,18 +283,19 @@ where
     ) {
         let day_template = format_description!(version = 2, "[weekday repr:short]");
 
-        let day_text_style = U8g2TextStyle::new(fonts::u8g2_font_wqy16_t_gb2312b, RgbColor::WHITE);
+        let day_text_style = U8g2TextStyle::new(TFontSet::get_day_font(), RgbColor::WHITE);
 
         let day_as_text = vm.time.unwrap().format(&day_template).unwrap();
 
-        let half_width = time_text_bounds.size.width as i32 / 2;
+        let half_width = RelativeSize::from(time_text_bounds.size.width) / 2u32;
 
-        let top_left = Point::new(half_width + 119, 140);
+        let top_left =
+            RelativeCoordinate::new(half_width + RelativeSize::from(500u16), 588u16.into());
 
         Graphics::<TDisplay>::text_aligned(
             frame,
             &day_as_text,
-            top_left,
+            top_left.to_absolute(TDisplay::FRAME_BUFFER_SIDE),
             day_text_style,
             embedded_graphics::text::Alignment::Right,
         );
@@ -361,7 +314,7 @@ where
             .to_radians()
             .sin_cos();
 
-        let zero_point = Self::get_zero_point();
+        let zero_point = Self::get_center_point().to_absolute(TDisplay::FRAME_BUFFER_SIDE);
 
         let p1 = Point::new(
             (outer_radius * sin) as i32 + zero_point.x,
@@ -387,26 +340,30 @@ where
 
         let text = format!(
             "{}{}",
-            char::from_u32(0xe0c0 + 14).unwrap(),
-            vm.temperature.unwrap()
+            vm.temperature.unwrap(),
+            char::from_u32(0x00b0).unwrap(),
         );
 
-        let style_time = U8g2TextStyle::new(fonts::u8g2_font_siji_t_6x10, RgbColor::WHITE);
+        let style_time = U8g2TextStyle::new(TFontSet::get_temperature_font(), RgbColor::WHITE);
+
+        let point = Self::get_center_point() + (0, 84).into();
 
         Graphics::<TDisplay>::text_aligned(
             frame,
             &text,
-            Point::new(120, 140),
+            point.to_absolute(TDisplay::FRAME_BUFFER_SIDE),
             style_time,
             embedded_graphics::text::Alignment::Center,
         );
     }
 
     pub fn render_alarm(frame: &mut TDisplay::FrameBuffer<'_>, vm: &ViewModel) {
-        render_event_icon::<TDisplay>(
+        let point = Self::get_center_point() + (0, 105).into();
+
+        render_event_icon::<TDisplay, TIconSet>(
             frame,
             CalendarEventIcon::Alarm,
-            Point::new(120, 145),
+            point.to_absolute(TDisplay::FRAME_BUFFER_SIDE),
             12,
             RgbColor::RED,
         );
@@ -477,7 +434,7 @@ where
             RgbColor::WHITE
         };
 
-        let text_style = U8g2TextStyle::new(fonts::u8g2_font_siji_t_6x10, color);
+        let text_style = U8g2TextStyle::new(TFontSet::get_temperature_font(), color);
 
         let text = format!(
             "{}'{}{}",
@@ -486,26 +443,27 @@ where
             char::from_u32(0xe220 + 7).unwrap()
         );
 
-        let top_left = Point::new(120, 140);
+        let top_left = Self::get_center_point() + (0, 84).into();
 
         Graphics::<TDisplay>::text_aligned(
             frame,
             &text,
-            top_left,
+            top_left.to_absolute(TDisplay::FRAME_BUFFER_SIDE),
             text_style,
             embedded_graphics::text::Alignment::Center,
         );
     }
 
     pub fn render_battery_level(frame: &mut TDisplay::FrameBuffer<'_>, vm: &ViewModel) {
-        let point = Point::new(120, 180);
+        let point = RelativeCoordinate::from((504u16, 756u16)); //Point::new(120, 180);
+        let absolute_point = point.to_absolute(TDisplay::FRAME_BUFFER_SIDE);
 
         if let Some(is_charging) = vm.is_charging {
             if is_charging {
                 Graphics::<TDisplay>::icon_center(
                     frame,
-                    point,
-                    &size12px::BatteryCharging::new(TDisplay::ColorModel::WHITE),
+                    absolute_point,
+                    &size24px::BatteryCharging::new(TDisplay::ColorModel::WHITE),
                 );
 
                 return;
@@ -516,10 +474,10 @@ where
             return;
         }
 
-        render_battery_level_icon::<TDisplay>(
+        render_battery_level_icon::<TDisplay, TIconSet>(
             frame,
             vm.battery_level.unwrap(),
-            point,
+            absolute_point,
             TDisplay::ColorModel::WHITE,
         );
     }
@@ -531,9 +489,16 @@ where
 
         let is_ble_connected = vm.ble_connected.unwrap();
         if is_ble_connected {
-            let icon = size12px::BluetoothTransfer::new(TDisplay::ColorModel::WHITE);
+            let icon = TIconSet::get_bluetooth_icon(TDisplay::ColorModel::WHITE);
 
-            Graphics::<TDisplay>::icon(frame, Point::new(120 - 60, 130), &icon);
+            let center = Self::get_center_point();
+            let coord = center - (252, 0).into() + (0, 42).into();
+
+            Graphics::<TDisplay>::icon(
+                frame,
+                coord.to_absolute(TDisplay::FRAME_BUFFER_SIDE),
+                &icon,
+            );
         };
     }
 
@@ -702,10 +667,21 @@ where
     ) {
         debug!("render of {:?}", render_layers_mask);
 
+        info!("rendering model: {:?}", vm);
+
         if render_layers_mask.contains(LayerType::Static) {
             display.render(LayerType::Static, RenderMode::Invalidate, |mut frame| {
-                let watchface_data = include_bytes!("../../assets/blinky_watchface_magic_eye.tga");
-                let tga: Tga<Rgb555> = Tga::from_slice(watchface_data).unwrap();
+                let tga: Tga<Rgb555> = if TDisplay::FRAME_BUFFER_SIDE <= 240 {
+                    Tga::from_slice(include_bytes!(
+                        "../../assets/blinky_watchface_magic_eye_240.tga"
+                    ))
+                    .unwrap()
+                } else {
+                    Tga::from_slice(include_bytes!(
+                        "../../assets/blinky_watchface_magic_eye_466.tga"
+                    ))
+                    .unwrap()
+                };
 
                 let watchface = tga.pixels().filter_map(|x| {
                     if x.1 == Rgb555::BLACK {
@@ -740,7 +716,7 @@ where
                         }
                     }
                     VisualMode::Details => {
-                        Self::render_debug_info(&mut frame, vm);
+                        //Self::render_debug_info(&mut frame, vm);
                         Self::render_current_events_details(&mut frame, vm);
                     }
                 }
@@ -767,20 +743,28 @@ where
             .iter()
             .filter(|x| x.start <= now && x.end > now);
 
-        let mut style_underline = MonoTextStyle::new(&FONT_6X10, TDisplay::ColorModel::WHITE);
-        style_underline.set_underline_color(embedded_graphics::text::DecorationColor::TextColor);
+        let mut text_style_underline = U8g2TextStyle::new(
+            TFontSet::get_event_details_font(),
+            TDisplay::ColorModel::WHITE,
+        );
 
-        let style = MonoTextStyle::new(&FONT_6X10, TDisplay::ColorModel::WHITE);
+        text_style_underline
+            .set_underline_color(embedded_graphics::text::DecorationColor::TextColor);
 
-        let zero_point = Self::get_zero_point();
+        let text_style_normal = U8g2TextStyle::new(
+            TFontSet::get_event_details_font(),
+            TDisplay::ColorModel::WHITE,
+        );
+
+        let zero_point = Self::get_center_point().to_absolute(TDisplay::FRAME_BUFFER_SIDE);
 
         let mut correction: i32 = 0;
 
         for (index, event) in current_events.enumerate() {
             Text::with_alignment(
                 event.title.as_str(),
-                Point::new(0, -20 + ((index as i32 + correction) * 2) * 12) + zero_point,
-                style_underline,
+                zero_point + Point::new(0, ((index as i32 + correction as i32) * 2) * 12),
+                &text_style_underline,
                 embedded_graphics::text::Alignment::Center,
             )
             .draw(frame)
@@ -794,7 +778,7 @@ where
             Text::with_alignment(
                 event.description.as_str(),
                 Point::new(0, -20 + ((index as i32 + correction) * 2 + 1) * 12) + zero_point,
-                style,
+                &text_style_normal,
                 embedded_graphics::text::Alignment::Center,
             )
             .draw(frame)
@@ -873,14 +857,17 @@ where
             // ?
         }
 
-        let radius = 60.0;
+        let radius: RelativeSize = 252.into();
         let angle = Angle::from_degrees(35.0 - 70.0 * index as f32);
 
         let (sin, cos) = (Angle::from_radians(std::f32::consts::PI) - angle)
             .to_radians()
             .sin_cos();
 
-        let p1 = Point::new((radius * sin) as i32, (radius * cos) as i32);
+        let p1 = Point::new(
+            (radius.to_absolute(TDisplay::FRAME_BUFFER_SIDE) as f32 * sin) as i32,
+            (radius.to_absolute(TDisplay::FRAME_BUFFER_SIDE) as f32 * cos) as i32,
+        );
 
         let color = if event.color == 0 {
             TDisplay::ColorModel::BLACK
@@ -890,7 +877,7 @@ where
 
         let style = EventTagStyle::large(event.icon, color);
 
-        let zero_point = Self::get_zero_point();
+        let zero_point = Self::get_center_point().to_absolute(TDisplay::FRAME_BUFFER_SIDE);
 
         Self::render_event_icon(frame, p1 + zero_point, &style)
     }
@@ -934,18 +921,18 @@ where
             event.end
         };
 
-        let lane_line_thickness = 4;
-        let lane_spacing = 28;
-        let outer_lane_diameter = 225;
-        let event_arc_diameter = outer_lane_diameter - (event.lane as u32 * lane_spacing);
+        let lane_line_thickness = RelativeSize::from(16);
+        let lane_spacing = RelativeSize::from(117); //28;
+        let outer_lane_diameter = RelativeSize::from(945); //225;
+        let event_arc_diameter = outer_lane_diameter - (lane_spacing * event.lane as u16);
 
         Self::render_time_range_arc(
             frame,
             &now,
             &event.start,
             &visual_end,
-            event_arc_diameter,
-            lane_line_thickness,
+            event_arc_diameter.to_absolute(TDisplay::FRAME_BUFFER_SIDE) as u32,
+            lane_line_thickness.to_absolute(TDisplay::FRAME_BUFFER_SIDE) as u32,
             color,
         );
 
@@ -954,9 +941,9 @@ where
         let style = EventTagStyle::default(event.icon, TDisplay::ColorModel::BLACK);
 
         if event.start <= now {
-            let zero_point = Self::get_zero_point();
-            let outer_radius: f32 = event_arc_diameter as f32 / 2.0;
-            let p1 = Point::new(0, outer_radius as i32);
+            let zero_point = Self::get_center_point().to_absolute(TDisplay::FRAME_BUFFER_SIDE);
+            let outer_radius: RelativeSize = event_arc_diameter / 2;
+            let p1 = Point::new(0, outer_radius.to_absolute(TDisplay::FRAME_BUFFER_SIDE));
             Self::render_event_icon(frame, zero_point - p1, &style);
         } else {
             if event.start - now <= Duration::minutes(30) {}
@@ -967,7 +954,7 @@ where
                     * 2.0,
             );
 
-            Self::render_event_tag(frame, start_angle, event_arc_diameter as f32, style);
+            Self::render_event_tag(frame, start_angle, event_arc_diameter, style);
         };
     }
 
@@ -977,7 +964,7 @@ where
         start: &OffsetDateTime,
         end: &OffsetDateTime,
         diameter: u32,
-        thickness: u8,
+        thickness: u32,
         color: TDisplay::ColorModel,
     ) {
         let event_start_rel = if start > now {
@@ -998,7 +985,7 @@ where
 
         let angle_sweep = end_angle - start_angle;
 
-        let style = PrimitiveStyle::with_stroke(color, thickness as u32);
+        let style = PrimitiveStyle::with_stroke(color, thickness);
 
         let three_quaters = Angle::from_degrees(90.0);
         let start = start_angle - three_quaters;
@@ -1021,15 +1008,17 @@ where
     fn render_event_tag(
         frame: &mut TDisplay::FrameBuffer<'_>,
         angle: Angle,
-        outer_diameter: f32,
+        outer_diameter: RelativeSize,
         event_style: EventTagStyle<TDisplay::ColorModel>,
     ) {
-        let outer_radius: f32 = outer_diameter / 2.0;
+        let outer_radius: RelativeSize = outer_diameter / 2;
 
-        let event_style_rad = event_style.event_tag_size / 2;
-        let tag_rad_squared = event_style_rad as f32 * event_style_rad as f32;
-        let outer_rad_squared = outer_radius * outer_radius;
-        let arccos_arg = (2.0 * outer_rad_squared - tag_rad_squared) / (2.0 * outer_rad_squared);
+        let event_style_rad: RelativeSize = event_style.event_tag_size / 2;
+        let tag_rad_squared = event_style_rad.squared();
+
+        let outer_rad_squared = outer_radius.squared();
+        let arccos_arg: f32 = (outer_rad_squared as f32 * 2.0 - tag_rad_squared as f32)
+            / (outer_rad_squared as f32 * 2.0);
 
         let angle_correction = arccos_arg.acos();
 
@@ -1037,11 +1026,13 @@ where
             .to_radians()
             .sin_cos();
 
-        let zero_point = Self::get_zero_point();
+        let zero_point = Self::get_center_point().to_absolute(TDisplay::FRAME_BUFFER_SIDE);
 
         let p1 = Point::new(
-            (outer_radius * sin) as i32 + zero_point.x,
-            (outer_radius * cos) as i32 + zero_point.y,
+            (outer_radius.to_absolute(TDisplay::FRAME_BUFFER_SIDE) as f32 * sin) as i32
+                + zero_point.x,
+            (outer_radius.to_absolute(TDisplay::FRAME_BUFFER_SIDE) as f32 * cos) as i32
+                + zero_point.y,
         );
 
         Self::render_event_icon(frame, p1, &event_style);
@@ -1052,19 +1043,25 @@ where
         point: Point,
         style: &EventTagStyle<TDisplay::ColorModel>,
     ) {
-        let thickness = style.thickness as u32;
-        let event_tag_size = style.event_tag_size as u32;
+        let thickness = style.thickness;
+        let event_tag_size = style.event_tag_size;
         let icon = style.icon;
         let color = style.color;
 
-        let mut solid_style = PrimitiveStyle::with_stroke(TDisplay::ColorModel::WHITE, thickness);
+        let mut solid_style = PrimitiveStyle::with_stroke(
+            TDisplay::ColorModel::WHITE,
+            thickness.to_absolute_u32(TDisplay::FRAME_BUFFER_SIDE),
+        );
         solid_style.fill_color = Some(TDisplay::ColorModel::WHITE);
 
-        primitives::Circle::with_center(point, event_tag_size)
-            .draw_styled(&solid_style, frame)
-            .unwrap();
+        primitives::Circle::with_center(
+            point,
+            event_tag_size.to_absolute_u32(TDisplay::FRAME_BUFFER_SIDE),
+        )
+        .draw_styled(&solid_style, frame)
+        .unwrap();
 
-        render_event_icon::<TDisplay>(frame, icon, point, 6, color);
+        render_event_icon::<TDisplay, TIconSet>(frame, icon, point, 6, color);
     }
 
     fn draw_event_tag_template(
@@ -1107,7 +1104,7 @@ where
     fn render_debug_info(frame: &mut TDisplay::FrameBuffer<'_>, vm: &mut ViewModel) {
         let text = format!("gesture = {}", vm.gesture);
 
-        let style_time = U8g2TextStyle::new(fonts::u8g2_font_siji_t_6x10, RgbColor::WHITE);
+        let style_time = U8g2TextStyle::new(TFontSet::get_event_details_font(), RgbColor::WHITE);
 
         Graphics::<TDisplay>::text_aligned(
             frame,

@@ -2,7 +2,7 @@ use blinky_shared::error::Error;
 use bma423::{AccelConfigOdr, Bma423, Config, FeatureInterruptStatus, FullPower, InterruptStatus};
 use esp_idf_hal::delay::Ets;
 use esp_idf_hal::i2c::I2cDriver;
-use log::{debug, info, warn};
+use log::{debug, error, info, warn};
 use peripherals::{
     bma423ex::{AxesConfig, Bma423Ex, InterruptIOCtlFlags},
     i2c_proxy_async::I2cProxyAsync,
@@ -49,7 +49,8 @@ impl<'a> Accelerometer<'a> {
 
                     warn!("{}", err_message);
 
-                    if counter > 3 {
+                    if counter > 2 {
+                        error!("{}", err_message);
                         return Err(Error::from(err_message.as_str()));
                     }
 

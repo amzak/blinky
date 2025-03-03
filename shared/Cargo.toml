@@ -20,7 +20,7 @@ rmp-serde = "1.1.2"
 strum_macros = "0.25.3"
 embedded-graphics = "0.8.1"
 embedded-graphics-framebuf = "0.5.0"
-embedded-icon = { version = "0.0.1", features = ["12px", "18px"] }
+embedded-icon = { version = "0.0.1", features = ["12px", "18px", "24px"] }
 tokio = { version = "1.36.0", features = ["rt-multi-thread", "sync", "time", "macros"] }
 log = "0.4.20"
 u8g2-fonts = { version = "0.4.0", features = ["embedded_graphics_textstyle"] }

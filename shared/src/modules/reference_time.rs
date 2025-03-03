@@ -88,6 +88,8 @@ impl ReferenceTime {
         };
 
         loop {
+            info!("reference data loop");
+
             match rx.blocking_recv() {
                 Some(event) => {
                     if matches!(event, Events::Term) {

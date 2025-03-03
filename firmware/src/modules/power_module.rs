@@ -1,11 +1,10 @@
 use crate::peripherals::adc::AdcDevice;
 use crate::peripherals::hal::PinConfig;
 use crate::peripherals::output::PinOutput;
-use crate::peripherals::pins::mapping::PinsMapping;
 use blinky_shared::domain::WakeupCause;
 use blinky_shared::reminders::ReminderKind;
 use esp_idf_hal::adc::Adc;
-use esp_idf_hal::gpio::{ADCPin, AnyIOPin, Level, OutputPin, PinDriver, Pull};
+use esp_idf_hal::gpio::{ADCPin, AnyIOPin, Level, Output, OutputPin, Pin, PinDriver, Pull};
 use esp_idf_hal::peripheral::Peripheral;
 use esp_idf_sys::{
     esp_sleep_ext1_wakeup_mode_t_ESP_EXT1_WAKEUP_ALL_LOW, esp_sleep_source_t_ESP_SLEEP_WAKEUP_ALL,
@@ -14,7 +13,10 @@ use esp_idf_sys::{
     esp_sleep_wakeup_cause_t, gpio_int_type_t_GPIO_INTR_LOW_LEVEL, gpio_num_t_GPIO_NUM_34,
 };
 use log::info;
-use std::sync::Arc;
+use peripherals::pins::mapping::PinsMapping;
+use std::cell::{Ref, RefCell, RefMut};
+use std::rc::Rc;
+use std::sync::{Arc, Mutex};
 use tokio::select;
 use tokio::sync::Notify;
 use tokio::time::{sleep, Duration};
@@ -57,13 +59,30 @@ impl BusHandler<Context> for PowerModule {
 }
 
 impl PowerModule {
-    const TILL_SCREEN_OFF_SEC: u64 = 5;
+    const TILL_SCREEN_OFF_SEC: u64 = 10;
     const TILL_DEEP_SLEEP_SEC: u64 = 30;
     const TILL_LIGHT_SLEEP_SEC: u64 = 10;
 
+    fn setup_wakeup_sources(pins_mapping: Arc<Mutex<impl PinsMapping>>) {
+        unsafe {
+            let button1_pin = pins_mapping.lock().unwrap().get_button1_pin_index();
+
+            let _result = esp_idf_sys::esp_sleep_enable_ext0_wakeup(button1_pin, 0); // key 2
+
+            let touch_int_pin = pins_mapping.lock().unwrap().get_touch_int_pin_index();
+
+            let _result_ext1 = esp_idf_sys::esp_sleep_enable_ext1_wakeup(
+                // accel, touchpad
+                1 << touch_int_pin,
+                esp_sleep_ext1_wakeup_mode_t_ESP_EXT1_WAKEUP_ALL_LOW,
+            );
+        }
+    }
+
     pub async fn start<TAdc, TAdcPin, TBacklightPin, PM>(
         adc: impl Peripheral<P = TAdc>,
-        pins_mapping: &mut PM,
+        pins_mapping: Arc<Mutex<PM>>,
+        backlight: Option<PinDriver<'_, TBacklightPin, Output>>,
         config: PinConfig,
         bus: MessageBus,
     ) where
@@ -74,17 +93,15 @@ impl PowerModule {
     {
         info!("starting...");
 
-        let backlight_pin = pins_mapping.get_backlight_pin();
-        let backlight_pin_index = backlight_pin.pin();
+        if backlight.is_some() {
+            let mut backlight = backlight.unwrap();
+            backlight.set_high().unwrap();
+        }
+        //let backlight = Self::init_backlight(backlight.pin());
 
-        let backlight = Self::init_backlight(backlight_pin_index);
         let idle_reset = Arc::new(Notify::new());
 
-        let idle_scenario = tokio::spawn(Self::idle_sequence(
-            bus.clone(),
-            backlight,
-            idle_reset.clone(),
-        ));
+        let idle_scenario = tokio::spawn(Self::idle_sequence(bus.clone(), idle_reset.clone()));
 
         let wakeup_cause = Self::get_wakeup_cause().await;
         Self::announce_wakeup_cause(&bus, &wakeup_cause);
@@ -93,7 +110,7 @@ impl PowerModule {
             Self::signal_reminder(&config, 2).await;
         }
 
-        let adc_pin = pins_mapping.get_adc_pin();
+        let adc_pin = pins_mapping.lock().unwrap().get_adc_pin();
 
         let mut adc_device = AdcDevice::new(adc, adc_pin);
 
@@ -107,16 +124,21 @@ impl PowerModule {
 
         idle_scenario.await.unwrap();
 
+        Self::setup_wakeup_sources(pins_mapping.clone());
+
         info!("done.");
     }
 
-    async fn idle_sequence(bus: MessageBus, mut backlight: PinOutput<'_>, token: Arc<Notify>) {
+    async fn idle_sequence(bus: MessageBus, /*backlight: PinOutput<'_>,*/ token: Arc<Notify>) {
         info!("idle_sequence");
+
+        //let backlight = backlight
+
         loop {
             info!("started idle sequence...");
             bus.send_cmd(Commands::ResumeRendering);
 
-            backlight.on();
+            // backlight.on();
 
             if !(Self::try_await_for(Self::TILL_SCREEN_OFF_SEC, &token).await) {
                 info!("abort idle sequence on TILL_SCREEN_OFF_SEC");
@@ -124,11 +146,11 @@ impl PowerModule {
             }
 
             bus.send_cmd(Commands::PauseRendering);
-            backlight.off();
+            // backlight.off();
 
             if !(Self::try_await_for(Self::TILL_LIGHT_SLEEP_SEC, &token).await) {
                 info!("abort idle sequence on TILL_LIGHT_SLEEP_SEC");
-                backlight.on();
+                // backlight.on();
                 continue;
             }
 
@@ -188,23 +210,7 @@ impl PowerModule {
         return result.unwrap();
     }
 
-    fn setup_wakeup_sources() {
-        unsafe {
-            let _result = esp_idf_sys::esp_sleep_enable_ext0_wakeup(gpio_num_t_GPIO_NUM_34, 0); // key 2
-
-            let _result_ext1 = esp_idf_sys::esp_sleep_enable_ext1_wakeup(
-                // accel, touchpad
-                1 << 32,
-                esp_sleep_ext1_wakeup_mode_t_ESP_EXT1_WAKEUP_ALL_LOW,
-            );
-        }
-    }
-
     pub fn goto_deep_sleep() {
-        info!("preparing for deep sleep...");
-
-        Self::setup_wakeup_sources();
-
         info!("going to deep sleep...");
 
         unsafe {
@@ -242,8 +248,10 @@ impl PowerModule {
     const ADC_MAX: u16 = 2050;
 
     fn convert_to_percent(adc_level: u16) -> u16 {
-        let percent: u32 =
-            100 * ((adc_level - Self::ADC_MIN) as u32) / (Self::ADC_MAX - Self::ADC_MIN) as u32;
+        return 50;
+
+        let percent: i32 =
+            100 * ((adc_level - Self::ADC_MIN) as i32) / (Self::ADC_MAX - Self::ADC_MIN) as i32;
 
         if percent > 100 {
             return 100;

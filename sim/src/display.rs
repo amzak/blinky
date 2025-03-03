@@ -27,26 +27,15 @@ pub struct SimDisplay {
 
 unsafe impl Send for SimDisplay {}
 
-impl ClockDisplayInterface for SimDisplay {
-    type Error = Infallible;
-
-    type ColorModel = Rgb565;
-
-    type FrameBuffer<'b> =
-        FrameBuf<Self::ColorModel, &'b mut [Self::ColorModel; Self::FRAME_BUFFER_SIZE]>;
-
-    const FRAME_BUFFER_SIDE: usize = 240;
-
-    const FRAME_BUFFER_SIZE: usize = Self::FRAME_BUFFER_SIDE * Self::FRAME_BUFFER_SIDE;
-
-    fn create() -> Self {
+impl SimDisplay {
+    pub fn create() -> Self {
         let display = SimulatorDisplay::<Rgb565>::new(Size::new(
             Self::FRAME_BUFFER_SIDE as u32,
             Self::FRAME_BUFFER_SIDE as u32,
         ));
 
         let output_settings = OutputSettingsBuilder::new()
-            .scale(3)
+            .scale(1)
             .pixel_spacing(1)
             .max_fps(5)
             .build();
@@ -67,6 +56,19 @@ impl ClockDisplayInterface for SimDisplay {
             window,
         }
     }
+}
+
+impl ClockDisplayInterface for SimDisplay {
+    type Error = Infallible;
+
+    type ColorModel = Rgb565;
+
+    type FrameBuffer<'b> =
+        FrameBuf<Self::ColorModel, &'b mut [Self::ColorModel; Self::FRAME_BUFFER_SIZE]>;
+
+    const FRAME_BUFFER_SIDE: usize = 466;
+
+    const FRAME_BUFFER_SIZE: usize = Self::FRAME_BUFFER_SIDE * Self::FRAME_BUFFER_SIDE;
 
     fn render<'c, 'd: 'c>(
         &'d mut self,

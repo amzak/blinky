@@ -18,8 +18,9 @@ debug = true # Symbols are nice and they don't increase the size on Flash
 opt-level = "z"
 
 [features]
-default = ["std", "embassy", "esp-idf-svc/native", "twatch_2021"]
+default = ["std", "embassy", "esp-idf-svc/native", "tdisplay143"]
 twatch_2021 = []
+tdisplay143 = []
 
 pio = ["esp-idf-svc/pio"]
 std = ["alloc", "esp-idf-svc/binstart", "esp-idf-svc/std"]

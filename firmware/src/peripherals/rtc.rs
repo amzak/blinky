@@ -40,8 +40,11 @@ impl<'a> Rtc<'a> {
         }
     }
 
-    pub fn get_now_utc(&mut self) -> PrimitiveDateTime {
-        let datetime_rtc = self.rtc.get_datetime().unwrap();
+    pub fn get_now_utc(&mut self) -> Result<PrimitiveDateTime, Error> {
+        let datetime_rtc = self.rtc.get_datetime().map_err(|err| {
+            let message = format!("get_datetime error: {:?}", err);
+            Error::from(message)
+        })?;
 
         let seconds = if datetime_rtc.seconds > 59 {
             59 // workaround for 60 seconds case
@@ -58,7 +61,7 @@ impl<'a> Rtc<'a> {
         .with_hms(datetime_rtc.hours, datetime_rtc.minutes, seconds)
         .unwrap();
 
-        datetime
+        Ok(datetime)
     }
 
     pub fn set_now_utc(&mut self, now: PrimitiveDateTime) -> Result<(), Error> {

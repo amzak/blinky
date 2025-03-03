@@ -1,3 +1,7 @@
+use std::cell::{Ref, RefCell, RefMut};
+use std::rc::Rc;
+use std::sync::{Arc, Mutex};
+
 use crate::peripherals::touchpad::TouchpadConfig;
 use esp_idf_hal::gpio::IOPin;
 use esp_idf_hal::i2c::{I2cConfig, I2cDriver, I2C0};
@@ -5,7 +9,7 @@ use esp_idf_hal::units::FromValueType;
 use peripherals::i2c_management::I2cManagement;
 use peripherals::i2c_proxy_async::I2cProxyAsync;
 
-use super::pins::mapping::PinsMapping;
+use peripherals::pins::mapping::PinsMapping;
 
 pub struct HAL<'d> {
     i2c_manager: I2cManagement<'d>,
@@ -23,14 +27,17 @@ pub struct PinConfig {
 }
 
 impl<'d> HAL<'d> {
-    pub fn new<TI2cScl, TI2cSda, PM>(config: HalConfig, i2c: I2C0, pins_mapping: &mut PM) -> HAL<'d>
+    pub fn new<TI2cScl, TI2cSda>(
+        config: HalConfig,
+        i2c: I2C0,
+        pins_mapping: Arc<Mutex<impl PinsMapping<TI2cScl = TI2cScl, TI2cSda = TI2cSda>>>,
+    ) -> HAL<'d>
     where
         TI2cScl: IOPin,
         TI2cSda: IOPin,
-        PM: PinsMapping<TI2cScl = TI2cScl, TI2cSda = TI2cSda>,
     {
-        let scl = pins_mapping.get_i2c_scl_pin();
-        let sda = pins_mapping.get_i2c_sda_pin();
+        let scl = pins_mapping.lock().unwrap().get_i2c_scl_pin();
+        let sda = pins_mapping.lock().unwrap().get_i2c_sda_pin();
         let i2c_config = I2cConfig::new().baudrate(100.kHz().into());
 
         let i2c_management =

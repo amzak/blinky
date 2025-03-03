@@ -22,8 +22,16 @@ where
         adc_hal: impl Peripheral<P = TAdcPin::Adc> + 'd,
         pin: impl Peripheral<P = TAdcPin> + 'd,
     ) -> Self {
+        #[cfg(feature = "twatch_2021")]
         let config = AdcChannelConfig {
             resolution: esp_idf_hal::adc::Resolution::Resolution10Bit,
+            attenuation: DB_11,
+            ..Default::default()
+        };
+
+        #[cfg(feature = "tdisplay143")]
+        let config = AdcChannelConfig {
+            resolution: esp_idf_hal::adc::Resolution::Resolution12Bit,
             attenuation: DB_11,
             ..Default::default()
         };

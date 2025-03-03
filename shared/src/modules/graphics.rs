@@ -6,7 +6,7 @@ use embedded_graphics::text::Alignment;
 use embedded_graphics::{
     image::Image,
     mono_font::{ascii::FONT_6X10, MonoTextStyle},
-    prelude::{DrawTarget, *},
+    prelude::*,
     primitives,
     text::Text,
 };

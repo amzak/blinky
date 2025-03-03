@@ -70,24 +70,32 @@ impl RtcModule {
 
         let mut rtc = rtc_param;
 
-        let datetime = rtc.get_now_utc().assume_offset(timezone);
-        bus.send_event(Events::TimeNow(datetime));
+        match rtc.get_now_utc() {
+            Ok(now_utc) => bus.send_event(Events::TimeNow(now_utc.assume_offset(timezone))),
+            Err(error) => error!("failed to get rtc time, {:?}", error),
+        }
 
         let mut is_paused = false;
 
         loop {
             let command_opt = rx.blocking_recv();
 
+            info!("rtc loop {:?}", command_opt);
+
             match command_opt {
                 Some(command) => match command {
                     Commands::GetTimeNow => {
-                        let now = rtc.get_now_utc().assume_offset(timezone);
+                        if let Ok(now_utc) = rtc.get_now_utc() {
+                            let now = now_utc.assume_offset(timezone);
 
-                        if !is_paused {
-                            bus.send_event(Events::TimeNow(now));
+                            if !is_paused {
+                                bus.send_event(Events::TimeNow(now));
+                            }
+
+                            invoke_reminders(&mut reminders, now, &bus);
+                        } else {
+                            error!("failed to get rtc time");
                         }
-
-                        invoke_reminders(&mut reminders, now, &bus);
                     }
                     Commands::SetReminders(mut reminders_param) => {
                         for reminder in reminders_param.drain(..) {

@@ -1,17 +1,17 @@
 [build]
-target = "xtensa-esp32-espidf"
+target = "xtensa-esp32s3-espidf"
 
-[target.xtensa-esp32-espidf]
+[target.xtensa-esp32s3-espidf]
 linker = "ldproxy"
-runner = "espflash flash -M -p /dev/ttyACM0 -f 80mhz -m dio -b 921600"
+runner = "espflash flash -M -p /dev/ttyACM0 -f 80mhz -m dio -b 115200"
 #rustflags = ["--cfg", "espidf_time64", "--cfg", "crossbeam_no_atomic_64", "--cfg", "tokio_unstable", "--cfg", "mio_unsupported_force_poll_poll", "-Z", "emit-stack-sizes", "-Z", "print-type-sizes"] # Extending time_t for ESP IDF 5: https://github.com/esp-rs/rust/issues/110
-rustflags = ["--cfg", "espidf_time64", "--cfg", "crossbeam_no_atomic_64"]
+rustflags = ["--cfg", "espidf_time64", "--cfg", "crossbeam_no_atomic_64", "--cfg", "mio_unsupported_force_poll_poll"]
 
 [unstable]
 build-std = ["std", "panic_abort"]
 
 [env]
-MCU="esp32"
+MCU="esp32s3"
 # Note: this variable is not used by the pio builder (`cargo build --features pio`)
-ESP_IDF_VERSION = "v5.1.2"
+ESP_IDF_VERSION = "v5.3.2"
 CRATE_CC_NO_DEFAULTS = "1"

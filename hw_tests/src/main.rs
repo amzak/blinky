@@ -11,7 +11,11 @@ use peripherals::pins::mapping::PinsMapping;
 use peripherals::pins::tdisplay143::TDisplay143;
 
 //mod bma423_tests;
+mod SH8601;
+mod bmi160_tests;
+mod display_api_tests;
 mod display_tests;
+mod spi_interface_no_dc;
 
 #[link_section = ".rtc.data"]
 pub static mut COUNTER: i32 = 0;
@@ -33,7 +37,9 @@ fn main() {
     let mut pins_mapping = TDisplay143::new(peripherals.pins);
 
     //bma423_tests::run(peripherals.i2c0);
-    display_tests::run(peripherals.spi2, &mut pins_mapping);
+    //display_tests::run(peripherals.spi2, &mut pins_mapping);
+    //display_api_tests::run(peripherals.spi2, &mut pins_mapping);
+    bmi160_tests::run(peripherals.i2c0, &mut pins_mapping);
 
     log::info!("going to deep sleep...");
 

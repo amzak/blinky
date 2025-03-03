@@ -1,5 +1,10 @@
 pub mod calendar_module;
+pub mod fonts_set;
 mod graphics;
+pub mod icon_set;
+pub mod icon_set_240;
+pub mod icon_set_466;
 pub mod reference_time;
+mod relative;
 pub mod renderer;
 mod renderer_icons;

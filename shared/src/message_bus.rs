@@ -185,11 +185,11 @@ impl MessageBus {
             let event_res = events_receiver.recv().await;
             match event_res {
                 Ok(event) => {
-                    error!("comparing events {:?} target {:?}", event, target_event);
-
                     if std::mem::discriminant(&event) == std::mem::discriminant(&target_event) {
                         break;
                     }
+
+                    info!("comparing events {:?} target {:?}", event, target_event);
                 }
                 Err(err) => {
                     error!("waiting for {:?} {:?}", err, target_event)

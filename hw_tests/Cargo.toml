@@ -33,8 +33,11 @@ esp-idf-sys = { version = "0.36.1", features = ["binstart"] }
 esp-idf-hal = { version = "0.45.2", features = ["alloc"], default-features = false }
 esp-idf-svc = { version = "0.50.1", default-features = false }
 bma423 = "0.0.3"
+bmi160 = "1.1.0"
 embedded-hal = "1.0.0"
 mipidsi = { version = "0.9.0" }
+embedded-graphics = "0.8.1"
+u8g2-fonts = { version = "0.4.0", features = ["embedded_graphics_textstyle"] }
 peripherals = { path = "../peripherals" }
 
 [build-dependencies]

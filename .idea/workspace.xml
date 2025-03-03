@@ -9,32 +9,12 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="deb8d081-a54e-4b96-a095-301257d0a7ef" name="Changes" comment="new project structure">
-      <change beforePath="$PROJECT_DIR$/firmware/Cargo.toml" beforeDir="false" afterPath="$PROJECT_DIR$/firmware/Cargo.toml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/firmware/sdkconfig.defaults" beforeDir="false" afterPath="$PROJECT_DIR$/firmware/sdkconfig.defaults" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/firmware/src/main.rs" beforeDir="false" afterPath="$PROJECT_DIR$/firmware/src/main.rs" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/firmware/src/modules/accel_module.rs" beforeDir="false" afterPath="$PROJECT_DIR$/firmware/src/modules/accel_module.rs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/firmware/src/modules/ble_module.rs" beforeDir="false" afterPath="$PROJECT_DIR$/firmware/src/modules/ble_module.rs" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/firmware/src/modules/calendar_module.rs" beforeDir="false" afterPath="$PROJECT_DIR$/firmware/src/modules/calendar_module.rs" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/firmware/src/modules/power_module.rs" beforeDir="false" afterPath="$PROJECT_DIR$/firmware/src/modules/power_module.rs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/firmware/src/modules/rtc_display_fasttrack.rs" beforeDir="false" afterPath="$PROJECT_DIR$/firmware/src/modules/rtc_display_fasttrack.rs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/firmware/src/modules/rtc_module.rs" beforeDir="false" afterPath="$PROJECT_DIR$/firmware/src/modules/rtc_module.rs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/firmware/src/modules/user_input.rs" beforeDir="false" afterPath="$PROJECT_DIR$/firmware/src/modules/user_input.rs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/firmware/src/peripherals/hal.rs" beforeDir="false" afterPath="$PROJECT_DIR$/firmware/src/peripherals/hal.rs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/firmware/src/peripherals/rtc.rs" beforeDir="false" afterPath="$PROJECT_DIR$/firmware/src/peripherals/rtc.rs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/firmware/src/peripherals/rtc_memory.rs" beforeDir="false" afterPath="$PROJECT_DIR$/firmware/src/peripherals/rtc_memory.rs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/shared/Cargo.lock" beforeDir="false" afterPath="$PROJECT_DIR$/shared/Cargo.lock" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/shared/Cargo.toml" beforeDir="false" afterPath="$PROJECT_DIR$/shared/Cargo.toml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/shared/src/calendar.rs" beforeDir="false" afterPath="$PROJECT_DIR$/shared/src/calendar.rs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/shared/src/commands.rs" beforeDir="false" afterPath="$PROJECT_DIR$/shared/src/commands.rs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/shared/src/events.rs" beforeDir="false" afterPath="$PROJECT_DIR$/shared/src/events.rs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/shared/src/lib.rs" beforeDir="false" afterPath="$PROJECT_DIR$/shared/src/lib.rs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/shared/src/modules/renderer.rs" beforeDir="false" afterPath="$PROJECT_DIR$/shared/src/modules/renderer.rs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/shared/src/modules/renderer_icons.rs" beforeDir="false" afterPath="$PROJECT_DIR$/shared/src/modules/renderer_icons.rs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/sim/Cargo.toml" beforeDir="false" afterPath="$PROJECT_DIR$/sim/Cargo.toml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/sim/src/main.rs" beforeDir="false" afterPath="$PROJECT_DIR$/sim/src/main.rs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/tests/Cargo.lock" beforeDir="false" afterPath="$PROJECT_DIR$/tests/Cargo.lock" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/tests/Cargo.toml" beforeDir="false" afterPath="$PROJECT_DIR$/tests/Cargo.toml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/tests/rust-toolchain.toml" beforeDir="false" afterPath="$PROJECT_DIR$/tests/rust-toolchain.toml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/firmware/src/peripherals/accelerometer.rs" beforeDir="false" afterPath="$PROJECT_DIR$/firmware/src/peripherals/accelerometer.rs" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -63,16 +43,16 @@
     <option name="hideEmptyMiddlePackages" value="true" />
     <option name="showLibraryContents" value="true" />
   </component>
-  <component name="PropertiesComponent"><![CDATA[{
-  "keyToString": {
-    "RunOnceActivity.OpenProjectViewOnStart": "true",
-    "RunOnceActivity.ShowReadmeOnStart": "true",
-    "kotlin-language-version-configured": "true",
-    "last_opened_file_path": "/home/amzak/projects/rust/esp32/blinky/shared/src/modules",
-    "org.rust.cargo.project.model.PROJECT_DISCOVERY": "true",
-    "settings.editor.selected.configurable": "preferences.pluginManager"
+  <component name="PropertiesComponent">{
+  &quot;keyToString&quot;: {
+    &quot;RunOnceActivity.OpenProjectViewOnStart&quot;: &quot;true&quot;,
+    &quot;RunOnceActivity.ShowReadmeOnStart&quot;: &quot;true&quot;,
+    &quot;kotlin-language-version-configured&quot;: &quot;true&quot;,
+    &quot;last_opened_file_path&quot;: &quot;/home/amzak/projects/rust/esp32/blinky/shared/src/modules&quot;,
+    &quot;org.rust.cargo.project.model.PROJECT_DISCOVERY&quot;: &quot;true&quot;,
+    &quot;settings.editor.selected.configurable&quot;: &quot;preferences.pluginManager&quot;
   }
-}]]></component>
+}</component>
   <component name="RecentsManager">
     <key name="CopyFile.RECENT_KEYS">
       <recent name="$PROJECT_DIR$/shared/src/modules" />
@@ -109,6 +89,16 @@
     </task>
     <option name="localTasksCounter" value="3" />
     <servers />
+  </component>
+  <component name="Vcs.Log.History.Properties">
+    <option name="COLUMN_ID_ORDER">
+      <list>
+        <option value="Default.Root" />
+        <option value="Default.Author" />
+        <option value="Default.Date" />
+        <option value="Default.Subject" />
+      </list>
+    </option>
   </component>
   <component name="Vcs.Log.Tabs.Properties">
     <option name="TAB_STATES">
